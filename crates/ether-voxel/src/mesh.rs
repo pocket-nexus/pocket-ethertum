@@ -685,8 +685,11 @@ impl Builder {
             out.foliage.indices.push(at);
         }
 
-        // Water: the faces that meet empty space. A face against solid terrain lies under the opaque surface or
-        // inside the terrain's own surface, and is left out.
+        // Water: the faces that meet air (the sea's surface, a pocket dug under it). A face against terrain is left
+        // out: against solid terrain it lies under the opaque surface or inside the terrain's own surface, and
+        // against terrain whose iso value rounds to 127 (stone a hair inside the surface, which the byte stores as
+        // -1/255, empty to the surface nets) it stood out of the sea floor as a dark slab; the reference meshes
+        // both.
         self.stream.clear();
         let stream = &mut self.stream;
         liquid(pad, |v, k| stream.push((v, k)));
@@ -694,7 +697,8 @@ impl Builder {
             let voxel = ((key >> 8) & 0xfff) as i32;
             let face = ((key >> 3) & 7) as usize;
             let p = ivec3((voxel >> 8) & 15, (voxel >> 4) & 15, voxel & 15);
-            pad.at(p + FACE_DIR[face]).isovalue() > 0.0
+            let n = pad.at(p + FACE_DIR[face]);
+            n.isovalue() > 0.0 || (n.tex != tex::NIL && n.shape == Shape::Isosurface)
         };
         let kept: Vec<(RefVertex, u32)> = self.stream.chunks_exact(6).filter(|f| !hidden(f[0].1)).flat_map(|f| f.iter().copied()).collect();
         self.stream = kept;
