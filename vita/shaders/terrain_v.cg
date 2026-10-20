@@ -11,10 +11,12 @@ void main(
     uniform float4 uOrigin,
     uniform float4 uUv,
     uniform float4 uFrame[4],
+    uniform sampler2D uRing,
     out float4 oPosition : POSITION,
     out float2 oUvX : TEXCOORD0,
     out float2 oUvY : TEXCOORD1,
     out float2 oUvZ : TEXCOORD2,
+    out float4 oFog : TEXCOORD3,
     out float4 oBlend : COLOR0,
     out float4 oLight : COLOR1)
 {
@@ -29,5 +31,8 @@ void main(
     float3 b = pow(abs(aNormal), 4.5);
     b /= (b.x + b.y + b.z);
     oBlend = float4(b, aWeight);
-    oLight = float4(light_of(aNormal, aAo, uFrame), fog_of(p, uFrame));
+    // The fragment is texel × light + fog: the light is scaled by what the fog leaves.
+    float f = fog_of(p, uFrame);
+    oLight = float4(light_of(aNormal, aAo, uFrame) * (1.0 - f), 0.0);
+    oFog = float4(sky_toward(p, uRing, uFrame) * f, 0.0);
 }

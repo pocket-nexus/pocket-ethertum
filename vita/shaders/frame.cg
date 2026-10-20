@@ -2,7 +2,7 @@
 //   [0] xyz: towards the sun; w: the sun's strength (the reference's sin² of its angle)
 //   [1] rgb: light on a face that looks up (the sky); w: 1 / the distance where the world ends, in voxels
 //   [2] rgb: light on a face that looks down (the ground); w: seconds
-//   [3] rgb: the sun's colour; w: unused
+//   [3] rgb: the sun's colour; w: daylight on the sky picture (0 at night, 1 by day)
 // Per draw: uOrigin.xyz, the chunk's corner from the eye, in voxels. Positions arrive as 1/256 voxel from the
 // corner; the eye is the origin of the view, so the matrix uVp has no translation and far chunks keep their
 // precision.
@@ -15,10 +15,19 @@ float3 light_of(float3 n, float ao, float4 frame[4])
     return (amb + frame[3].rgb * sun) * ao * 0.5;
 }
 
-// The world fades into the sky over the last 40% of the loaded distance. The fade is an alpha: a chunk in that
-// band is blended over the sky picture already drawn behind it, so far terrain dissolves into the picture itself.
+// The world fades into the sky over the last quarter of the loaded distance: towards the sky picture's own colour
+// in the direction of the point, read here from a panorama of the sky box (uRing: azimuth across, elevation down,
+// +90° to −90°), so far terrain dissolves into what is drawn behind it while every draw stays opaque.
 float fog_of(float3 p, float4 frame[4])
 {
-    float d = saturate((length(p) * frame[1].w - 0.6) * 2.5);
+    float d = saturate((length(p) * frame[1].w - 0.75) * 4.0);
     return d * d;
+}
+
+float3 sky_toward(float3 p, sampler2D ring, float4 frame[4])
+{
+    float3 d = normalize(p);
+    float2 uv = float2(atan2(d.x, -d.z) * 0.15915494 + 0.5, 0.5 - asin(clamp(d.y, -1.0, 1.0)) * 0.31830989);
+    float day = frame[3].w;
+    return tex2Dlod(ring, float4(uv, 0.0, 0.0)).rgb * day + float3(0.02, 0.025, 0.05) * (1.0 - day);
 }

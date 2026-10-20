@@ -28,8 +28,6 @@ const FRAME_CG: &str = include_str!("../shaders/frame.cg");
 
 /// The reference's `sample_scale`: a terrain texture repeats every 1.5 voxels.
 const SAMPLE_SCALE: f32 = 1.5;
-/// The fade into the sky starts at this share of the loaded distance (`fog_of` in `frame.cg`).
-const FADE_START: f32 = 0.6;
 
 struct Part {
     vb: usize,
@@ -291,9 +289,7 @@ impl Scene {
                 st.culled += 1;
                 continue;
             }
-            // The farthest corner from the eye: past the fade's start the chunk is blended into the sky.
-            let far = min.abs().max((min + 16.0).abs()).length() > FADE_START * v.reach;
-            self.order.push(((min + 8.0).length_squared(), *at, far));
+            self.order.push(((min + 8.0).length_squared(), *at, false));
         }
         self.order.sort_unstable_by(|a, b| a.0.total_cmp(&b.0));
         st.chunks = self.order.len() as u32;
@@ -301,9 +297,10 @@ impl Scene {
         // Terrain: one draw per material, its texture bound. The base pass draws the near chunks opaque, then the
         // ones in the fade band blended (depth still written, so a chunk's nearest surface is the one that fades);
         // the layer pass is blended throughout.
+        g::sceGxmSetVertexTexture(ctx, 0, &self.textures.ring.gxm);
         if v.terrain {
             gpu::state_opaque(ctx, Cull::Back);
-            for far in [false, true] {
+            for far in [false] {
                 self.terrain.bind(ctx, far as usize);
                 self.terrain_pass(ctx, &vp, v, &mut st, 0, Some(far));
             }
@@ -318,14 +315,13 @@ impl Scene {
         }
 
         // Water.
-        st.tris = st.by_pass.iter().sum();
-        if !v.water {
-            return st;
-        }
         gpu::state_opaque(ctx, Cull::Back);
         g::sceGxmSetFragmentTexture(ctx, 0, &self.textures.water.gxm);
         let look = [0.02, 0.06, 0.07, 0.0, 0.0, 0.0, 0.0, 0.0, v.sky_zenith[0], v.sky_zenith[1], v.sky_zenith[2], 0.0, v.sky_horizon[0], v.sky_horizon[1], v.sky_horizon[2], v.sun, v.sun_dir.x, v.sun_dir.y, v.sun_dir.z, 0.0];
-        for far in [false, true] {
+        for far in [false] {
+            if !v.water {
+                break;
+            }
             self.water.bind(ctx, far as usize);
             for i in 0..self.order.len() {
                 let (_, at, f) = self.order[i];
@@ -346,7 +342,7 @@ impl Scene {
         if v.foliage {
             gpu::state_opaque(ctx, Cull::None);
             g::sceGxmSetFragmentTexture(ctx, 0, &self.textures.foliage.gxm);
-            for far in [false, true] {
+            for far in [false] {
                 self.foliage.bind(ctx, far as usize);
                 for i in 0..self.order.len() {
                     let (d2, at, f) = self.order[i];

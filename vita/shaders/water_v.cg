@@ -1,5 +1,6 @@
 // Faces of water voxels. The reference draws water opaque and mirror-like (deferred, black base colour,
 // roughness 0), its normal rippled by four octaves of a normal map at world.xz / 100; three octaves are kept.
+// The direction to the eye is normalized here, per vertex: a face is one voxel, and the eye is metres away.
 
 void main(
     float3 aPosition,
@@ -8,11 +9,13 @@ void main(
     uniform float4 uOrigin,
     uniform float4 uWorld,
     uniform float4 uFrame[4],
+    uniform sampler2D uRing,
     out float4 oPosition : POSITION,
+    out float4 oFog : TEXCOORD3,
     out float2 oN0 : TEXCOORD0,
     out float2 oN1 : TEXCOORD1,
     out float2 oN2 : TEXCOORD2,
-    out float4 oView : TEXCOORD3,
+    out float4 oView : COLOR1,
     out float4 oLight : COLOR0)
 {
     float3 local = aPosition * (1.0 / 256.0);
@@ -24,6 +27,10 @@ void main(
     oN0 = w * 1.0 + float2(0.080, 0.059) * t;
     oN1 = w * 2.1 + float2(0.073, -0.062) * t;
     oN2 = w * 7.9 + float2(0.153, 0.138) * t;
-    oView = float4(-p, aNormal.y);
-    oLight = float4(light_of(aNormal, 1.0, uFrame), fog_of(p, uFrame));
+    // Towards the eye, carried as a colour (0..1); w: 1 on a face that looks up, 0 on a side face.
+    float3 v = normalize(-p);
+    oView = float4(v * 0.5 + 0.5, saturate(aNormal.y));
+    float f = fog_of(p, uFrame);
+    oLight = float4(light_of(aNormal, 1.0, uFrame), f);
+    oFog = float4(sky_toward(p, uRing, uFrame) * f, 0.0);
 }

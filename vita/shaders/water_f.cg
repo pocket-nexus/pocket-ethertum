@@ -3,23 +3,34 @@ uniform sampler2D uNormals;
 // sun's strength; [4] xyz: towards the sun
 uniform float4 uLook[5];
 
-float2 octave(float2 uv)
+half2 octave(float2 uv)
 {
     // R and G hold the normal's x and z.
-    return tex2D(uNormals, uv).rg * 2.0 - 1.0;
+    return (half2)tex2D(uNormals, uv).rg * (half)2.0 - (half)1.0;
 }
 
-half4 main(float2 vN0 : TEXCOORD0, float2 vN1 : TEXCOORD1, float2 vN2 : TEXCOORD2, float4 vView : TEXCOORD3, half4 vLight : COLOR0) : COLOR
+half4 main(float2 vN0 : TEXCOORD0, float2 vN1 : TEXCOORD1, float2 vN2 : TEXCOORD2, half4 vFog : TEXCOORD3, half4 vView : COLOR1, half4 vLight : COLOR0) : COLOR
 {
-    // The octaves' strengths are the reference's (0.16, 0.18, 0.093); a side face keeps its own flat normal.
-    float2 xz = octave(vN0) * 0.16 + octave(vN1) * 0.18 + octave(vN2) * 0.093;
-    float top = saturate(vView.w);
-    float3 n = normalize(float3(xz.x * top, 1.0, xz.y * top));
-    float3 v = normalize(vView.xyz);
-    float fresnel = 0.02 + 0.98 * pow(1.0 - saturate(abs(dot(n, v))), 5.0);
-    float3 r = reflect(-v, n);
-    float3 sky = lerp(uLook[3].rgb, uLook[2].rgb, sqrt(saturate(r.y)));
-    float spec = pow(saturate(dot(r, uLook[4].xyz)), 300.0) * uLook[3].w * 4.0;
-    float3 c = lerp(uLook[0].rgb * vLight.rgb * 2.0, sky, fresnel * top) + spec;
-    return half4((half3)c, (half)(1.0 - vLight.a));
+    // The octaves' strengths are the reference's (0.16, 0.18, 0.093); a side face keeps its flat normal. The
+    // normal stays (x, 1, z) unnormalized: its ripples are small.
+    half top = vView.w;
+    half2 xz = (octave(vN0) * (half)0.16 + octave(vN1) * (half)0.18 + octave(vN2) * (half)0.093) * top;
+    half3 n = half3(xz.x, (half)1.0, xz.y);
+    half3 v = vView.xyz * (half)2.0 - (half)1.0;
+    half nv = saturate(dot(n, v));
+    half k = (half)1.0 - nv;
+    half k2 = k * k;
+    half fresnel = ((half)0.02 + (half)0.98 * k2 * k2 * k) * top;
+    // The reflection: r = 2 (n·v) n − v.
+    half3 r = (half)2.0 * nv * n - v;
+    half3 sky = lerp((half3)uLook[3].rgb, (half3)uLook[2].rgb, saturate(r.y));
+    half s = saturate(dot(r, (half3)uLook[4].xyz));
+    half s2 = s * s;
+    half s4 = s2 * s2;
+    half s8 = s4 * s4;
+    half s16 = s8 * s8;
+    half s32 = s16 * s16;
+    half spec = s32 * s32 * s32 * (half)uLook[3].w * (half)4.0;
+    half3 c = lerp((half3)uLook[0].rgb * vLight.rgb * (half)2.0, sky, fresnel) + spec;
+    return half4(c * ((half)1.0 - vLight.a) + vFog.rgb, (half)1.0);
 }

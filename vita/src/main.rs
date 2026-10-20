@@ -213,9 +213,10 @@ fn control_watcher() -> mpsc::Receiver<Value> {
     rx
 }
 
-/// The sky and the frame's light from the time of day. The sun is the reference's: its light turns about the
-/// world's z axis with the day, its strength sin² of its height. The reference's sky picture stays as it is all
-/// day; here daylight scales it and the night has a colour of its own.
+/// The sky and the frame's light from the time of day, as the reference lights its world: the sun's light turns
+/// about the world's z axis with the day and its strength is sin² of its height (none at night), while the sky
+/// picture and the light it casts (the reference's environment light, at a fixed intensity) stay as they are all
+/// day and all night.
 struct Sky {
     sun_dir: Vec3,
     sun: f32,
@@ -228,22 +229,16 @@ struct Sky {
 }
 
 fn sky(clock: &WorldClock, reg: &Registry, picture_horizon: [f32; 3]) -> Sky {
-    let sun_dir = clock.sun_dir().normalize();
-    let sun = clock.sun_strength();
-    let day = (sun_dir.y * 4.0 + 0.5).clamp(0.0, 1.0);
-    let mix = |n: [f32; 3], d: [f32; 3]| [n[0] + (d[0] - n[0]) * day, n[1] + (d[1] - n[1]) * day, n[2] + (d[2] - n[2]) * day];
     let _ = reg;
-    let h = picture_horizon;
     Sky {
-        sun_dir,
-        sun,
-        zenith: mix([0.02, 0.03, 0.08], [0.20, 0.45, 0.80]),
-        // Far terrain fades into the sky picture's own horizon, dimmed as the picture is by night.
-        horizon: [h[0] * day + 0.02 * (1.0 - day), h[1] * day + 0.025 * (1.0 - day), h[2] * day + 0.05 * (1.0 - day)],
-        up: mix([0.10, 0.12, 0.20], [0.62, 0.68, 0.78]),
-        down: mix([0.05, 0.05, 0.08], [0.32, 0.30, 0.27]),
-        tint: [day, day, day],
-        night: [0.02 * (1.0 - day), 0.025 * (1.0 - day), 0.05 * (1.0 - day)],
+        sun_dir: clock.sun_dir().normalize(),
+        sun: clock.sun_strength(),
+        zenith: [0.30, 0.52, 0.82],
+        horizon: picture_horizon,
+        up: [0.58, 0.64, 0.74],
+        down: [0.30, 0.29, 0.27],
+        tint: [1.0; 3],
+        night: [0.0; 3],
     }
 }
 
@@ -538,6 +533,7 @@ fn main() {
                     _ => {}
                 }
                 for (i, k) in ["terrain", "water", "foliage"].iter().enumerate() {
+                    // (each pass on its own; turning one off leaves the others)
                     if let Some(on) = v["show"][k].as_bool() {
                         show[i] = on;
                     }
@@ -748,7 +744,7 @@ fn main() {
                 sk.sun_dir.x, sk.sun_dir.y, sk.sun_dir.z, sk.sun,
                 sk.up[0], sk.up[1], sk.up[2], 1.0 / reach,
                 sk.down[0], sk.down[1], sk.down[2], clock.time_inhabited,
-                1.05, 0.98, 0.88, 0.0,
+                1.05, 0.98, 0.88, sk.tint[0],
             ];
             let proj = camera.projection_gl(960.0 / 544.0, 0.1, 1000.0);
             let v = scene::View { eye: camera.eye, vp: proj * camera.view_rotation(), frame, fog: sk.horizon, sky_zenith: sk.zenith, sky_horizon: sk.horizon, sky_tint: sk.tint, sky_night: sk.night, sun_dir: sk.sun_dir, sun: sk.sun, reach, terrain: show[0], water: show[1], foliage: show[2], plain: false };
