@@ -1,0 +1,11 @@
+{
+  "name": "pocket-ethertum",
+  "private": true,
+  "license": "GPL-3.0-only",
+  "type": "module",
+  "scripts": {
+    "setup": "git submodule update --init && bun install --cwd vendor/pocketjs",
+    "ui": "bun tools/ui.ts",
+    "test:ui": "bun tools/ui.ts test"
+  }
+}
