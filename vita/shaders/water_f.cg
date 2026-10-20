@@ -1,0 +1,12 @@
+// [0] rgb: the water's colour, a: its opacity; [1] rgb: the fog's colour; [2] rgb: the sky at the horizon
+uniform float4 uLook[3];
+
+half4 main(half4 vLight : COLOR0, float4 vView : TEXCOORD0) : COLOR
+{
+    float3 v = normalize(vView.xyz);
+    // Schlick's Fresnel term for a face that looks up, from how steeply it is seen.
+    half f = (half)(0.02 + 0.98 * pow(1.0 - saturate(abs(v.y)), 5.0)) * (half)saturate(vView.w);
+    half3 c = lerp((half3)uLook[0].rgb * vLight.rgb, (half3)uLook[2].rgb, f);
+    c = lerp(c, (half3)uLook[1].rgb, vLight.a);
+    return half4(c, lerp((half)uLook[0].a, (half)1.0, f));
+}

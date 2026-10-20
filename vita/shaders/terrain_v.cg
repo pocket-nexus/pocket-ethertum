@@ -1,0 +1,19 @@
+// The isosurface and placed cubes of one material: lit per vertex.
+
+void main(
+    float3 aPosition,
+    float3 aNormal,
+    float aAo,
+    float aWeight,
+    uniform float4x4 uVp,
+    uniform float4 uOrigin,
+    uniform float4 uFrame[4],
+    out float4 oPosition : POSITION,
+    out float4 oLight : COLOR0,
+    out float4 oFog : COLOR1)
+{
+    float3 p = aPosition * (1.0 / 256.0) + uOrigin.xyz;
+    oPosition = mul(uVp, float4(p, 1.0));
+    oLight = float4(light_of(aNormal, aAo, uFrame), aWeight);
+    oFog = float4(0.0, 0.0, 0.0, fog_of(p, uFrame));
+}

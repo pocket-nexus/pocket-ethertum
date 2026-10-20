@@ -1,0 +1,10 @@
+// [0] rgb: the material's colour; [1] rgb: the fog's colour
+uniform float4 uLook[2];
+
+half4 main(half4 vLight : COLOR0, half4 vFog : COLOR1) : COLOR
+{
+    half3 c = (half3)uLook[0].rgb * vLight.rgb;
+    c = lerp(c, (half3)uLook[1].rgb, vFog.a);
+    // Alpha is the batch material's weight: 1 in an opaque batch, a gradient across a layer.
+    return half4(c, vLight.a);
+}

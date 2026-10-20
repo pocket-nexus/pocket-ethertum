@@ -1,0 +1,11 @@
+// A quad over the screen; each corner carries its direction of view.
+
+void main(
+    float2 aPosition,
+    float3 aDirection,
+    out float4 oPosition : POSITION,
+    out float3 oDirection : TEXCOORD0)
+{
+    oPosition = float4(aPosition, 1.0, 1.0);
+    oDirection = aDirection;
+}

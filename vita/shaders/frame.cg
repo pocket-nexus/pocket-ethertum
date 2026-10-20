@@ -1,0 +1,21 @@
+// What every scene program takes per frame, as one array (uFrame):
+//   [0] xyz: towards the sun; w: the sun's strength (the reference's sin² of its angle)
+//   [1] rgb: light on a face that looks up (the sky); w: fog per voxel of distance
+//   [2] rgb: light on a face that looks down (the ground); w: seconds
+//   [3] rgb: the sun's colour; w: unused
+// Per draw: uOrigin.xyz, the chunk's corner from the eye, in voxels. Positions arrive as 1/256 voxel from the
+// corner; the eye is the origin of the view, so the matrix uVp has no translation and far chunks keep their
+// precision.
+
+float3 light_of(float3 n, float ao, float4 frame[4])
+{
+    float3 amb = lerp(frame[2].rgb, frame[1].rgb, n.y * 0.5 + 0.5);
+    float sun = max(dot(n, frame[0].xyz), 0.0) * frame[0].w;
+    return (amb + frame[3].rgb * sun) * ao;
+}
+
+float fog_of(float3 p, float4 frame[4])
+{
+    float d = length(p) * frame[1].w;
+    return saturate(1.0 - exp(-d * d));
+}
