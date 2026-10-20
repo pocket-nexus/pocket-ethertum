@@ -8,3 +8,7 @@ description = "Cooks the reference's art into the device pack"
 
 [dependencies]
 ether-pack = { path = "../ether-pack" }
+image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }
+texpresso = { version = "2", features = ["rayon"] }
+serde_json = "1"
+sha2 = "0.10"
