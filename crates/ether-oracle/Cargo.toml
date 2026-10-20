@@ -1,0 +1,15 @@
+[package]
+name = "ether-oracle"
+version = "0.1.0"
+edition = "2021"
+license = "GPL-3.0-only"
+publish = false
+description = "Differential oracle: the reference's own world generation and meshing source (ref/ethertum), compiled against small shims and compared with ether-voxel"
+
+[dependencies]
+bevy = { package = "ether-oracle-bevy", path = "shim-bevy" }
+bevy_egui = { package = "ether-oracle-egui", path = "shim-egui" }
+ether-oracle-derive = { path = "derive" }
+noise = "=0.9.0"
+glam = "0.33"
+ether-voxel = { path = "../ether-voxel" }

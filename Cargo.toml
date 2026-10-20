@@ -1,0 +1,17 @@
+[workspace]
+resolver = "2"
+members = ["crates/ether-voxel", "crates/ether-oracle", "crates/ether-oracle/shim-bevy", "crates/ether-oracle/shim-egui", "crates/ether-oracle/derive"]
+exclude = ["vita", "vendor", "ref"]
+
+# The oracle compiles the reference's chunk code, which writes voxels through `&T` cast to `&mut T`
+# (`util::as_mut`). That is undefined behaviour, and an optimizing build may drop those writes (a tree then
+# grows no leaves). Without optimization the writes happen, which is what the reference means: the oracle
+# is always built that way, whatever the profile. Everything else is optimized.
+[profile.dev.package."*"]
+opt-level = 3
+
+[profile.dev.package.ether-oracle]
+opt-level = 0
+
+[profile.release.package.ether-oracle]
+opt-level = 0

@@ -1,0 +1,11 @@
+[package]
+name = "ether-oracle-bevy"
+version = "0.1.0"
+edition = "2021"
+license = "GPL-3.0-only"
+publish = false
+description = "The few Bevy names the reference's voxel source uses, for compiling it outside Bevy"
+
+[dependencies]
+glam = "0.33"
+ether-oracle-derive = { path = "../derive" }

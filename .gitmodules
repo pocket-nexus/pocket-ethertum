@@ -1,0 +1,6 @@
+[submodule "vendor/pocketjs"]
+	path = vendor/pocketjs
+	url = https://github.com/pocket-nexus/pocketjs.git
+[submodule "ref/ethertum"]
+	path = ref/ethertum
+	url = https://github.com/Dreamtowards/Ethertum.git

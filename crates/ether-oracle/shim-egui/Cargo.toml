@@ -1,0 +1,10 @@
+[package]
+name = "ether-oracle-egui"
+version = "0.1.0"
+edition = "2021"
+license = "GPL-3.0-only"
+publish = false
+description = "egui's emath at the version the reference locks, under the path the reference imports it by"
+
+[dependencies]
+emath = "=0.34.3"

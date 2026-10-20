@@ -1,0 +1,15 @@
+[package]
+name = "ether-voxel"
+version = "0.1.0"
+edition = "2021"
+license = "GPL-3.0-only"
+publish = false
+description = "Ethertum's voxel world as a no_std engine: noise, generation, population, surface nets and the meshes a renderer draws"
+
+[dependencies]
+glam = { version = "0.33", default-features = false, features = ["libm", "i32", "f64"] }
+libm = "0.2"
+
+[features]
+default = ["std"]
+std = ["glam/std"]

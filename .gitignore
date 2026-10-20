@@ -1,0 +1,14 @@
+# Build output
+/target/
+/vita/target/
+/dist/
+node_modules/
+
+# Cooked packs, USB share, captures, receipts
+/.pocket-build/
+
+.DS_Store
+
+# The interface's build state
+/ui/.pocket/
+/ui/app/generated/
