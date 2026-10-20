@@ -1,6 +1,6 @@
 uniform sampler2D uNormals;
-// [0] rgb: the water's own colour; [1] rgb: the fog's colour; [2] rgb: the sky overhead; [3] rgb: the sky at the
-// horizon, w: the sun's strength; [4] xyz: towards the sun
+// [0] rgb: the water's own colour; [1] unused; [2] rgb: the sky overhead; [3] rgb: the sky at the horizon, w: the
+// sun's strength; [4] xyz: towards the sun
 uniform float4 uLook[5];
 
 float2 octave(float2 uv)
@@ -21,6 +21,5 @@ half4 main(float2 vN0 : TEXCOORD0, float2 vN1 : TEXCOORD1, float2 vN2 : TEXCOORD
     float3 sky = lerp(uLook[3].rgb, uLook[2].rgb, sqrt(saturate(r.y)));
     float spec = pow(saturate(dot(r, uLook[4].xyz)), 300.0) * uLook[3].w * 4.0;
     float3 c = lerp(uLook[0].rgb * vLight.rgb * 2.0, sky, fresnel * top) + spec;
-    c = lerp(c, uLook[1].rgb, vLight.a);
-    return half4((half3)c, (half)1.0);
+    return half4((half3)c, (half)(1.0 - vLight.a));
 }

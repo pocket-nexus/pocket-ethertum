@@ -17,6 +17,9 @@ pub struct Textures {
     pub water: Texture,
     /// Average colour of each terrain material (sRGB), for anything that wants one colour of it.
     pub average: Vec<[u8; 4]>,
+    /// The sky picture's colour at the horizon: the mean of the middle rows of the four side faces (0..1, sRGB).
+    /// Distant terrain fades into it.
+    pub horizon: [f32; 3],
     _vram: Arena,
     pub bytes: usize,
 }
@@ -55,6 +58,25 @@ impl Textures {
         let foliage = upload(&mut up, &mut vram, &foli, 0, Wrap::Clamp, true)?;
         up.flush();
         let sky_set = pack.textures(tag::SKY).map_err(|e| format!("SKY_: {e:?}"))?;
+        // Rows a little above the middle of +X, −X, +Z and −Z (the band where far terrain meets the sky).
+        let mut sum = [0f64; 3];
+        let mut n = 0f64;
+        if sky_set.format == PackFormat::Rgba8 {
+            for face in [0u32, 1, 4, 5] {
+                let px = sky_set.texture(face);
+                let w = sky_set.width as usize;
+                for row in (sky_set.height as usize * 7 / 16)..(sky_set.height as usize / 2) {
+                    for x in 0..w {
+                        let i = (row * w + x) * 4;
+                        for c in 0..3 {
+                            sum[c] += px[i + c] as f64;
+                        }
+                        n += 1.0;
+                    }
+                }
+            }
+        }
+        let horizon = if n > 0.0 { [(sum[0] / n / 255.0) as f32, (sum[1] / n / 255.0) as f32, (sum[2] / n / 255.0) as f32] } else { [0.6, 0.7, 0.8] };
         let mut sky = Vec::new();
         for i in 0..sky_set.count {
             sky.push(upload(&mut up, &mut vram, &sky_set, i, Wrap::Clamp, false)?);
@@ -65,6 +87,6 @@ impl Textures {
         up.flush();
         up.free();
         let bytes = vram.used();
-        Ok(Textures { terrain, foliage, sky, water, average, _vram: vram, bytes })
+        Ok(Textures { terrain, foliage, sky, water, average, horizon, _vram: vram, bytes })
     }
 }

@@ -651,10 +651,27 @@ impl Builder {
             out.terrain.batches.push(batch);
         }
 
-        // Foliage: cards share their four corners.
+        // Foliage: cards share their four corners. A leaf voxel with leaves or solid ground on all six sides is
+        // inside a crown, and its cards are left out. Cards are stored in the order of a hash of their voxel, so
+        // any prefix of the indices is an even share of the cards (`ChunkMesh::foliage` is drawn thinner with
+        // distance by drawing a prefix).
         self.stream.clear();
         let stream = &mut self.stream;
         foliage(pad, |v, k| stream.push((v, k)));
+        let buried = |voxel: i32| -> bool {
+            let p = ivec3((voxel >> 8) & 15, (voxel >> 4) & 15, voxel & 15);
+            if pad.at(p).shape != Shape::Leaves {
+                return false;
+            }
+            FACE_DIR.iter().all(|d| {
+                let n = pad.at(p + *d);
+                n.shape == Shape::Leaves || n.isovalue() > 0.0 || n.is_opaque_cube()
+            })
+        };
+        let mut cards: Vec<(u32, usize)> = self.stream.chunks_exact(6).enumerate().filter(|(_, c)| !buried((c[0].1 >> 5) as i32)).map(|(i, c)| ((c[0].1 >> 5).wrapping_mul(0x9e37_79b9) ^ (c[0].1 >> 2 & 7), i)).collect();
+        cards.sort_unstable();
+        let order: Vec<(RefVertex, u32)> = cards.iter().flat_map(|(_, i)| self.stream[i * 6..i * 6 + 6].iter().copied()).collect();
+        self.stream = order;
         self.keys.clear();
         for (v, key) in self.stream.iter() {
             let verts = &mut out.foliage.vertices;
@@ -668,10 +685,19 @@ impl Builder {
             out.foliage.indices.push(at);
         }
 
-        // Water.
+        // Water: the faces that meet empty space. A face against solid terrain lies under the opaque surface or
+        // inside the terrain's own surface, and is left out.
         self.stream.clear();
         let stream = &mut self.stream;
         liquid(pad, |v, k| stream.push((v, k)));
+        let hidden = |key: u32| -> bool {
+            let voxel = ((key >> 8) & 0xfff) as i32;
+            let face = ((key >> 3) & 7) as usize;
+            let p = ivec3((voxel >> 8) & 15, (voxel >> 4) & 15, voxel & 15);
+            pad.at(p + FACE_DIR[face]).isovalue() > 0.0
+        };
+        let kept: Vec<(RefVertex, u32)> = self.stream.chunks_exact(6).filter(|f| !hidden(f[0].1)).flat_map(|f| f.iter().copied()).collect();
+        self.stream = kept;
         self.keys.clear();
         for (v, key) in self.stream.iter() {
             let verts = &mut out.liquid.vertices;

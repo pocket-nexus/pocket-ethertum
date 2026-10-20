@@ -16,6 +16,13 @@ pocket-vita-gxm = { path = "../vendor/pocketjs/devices/vita/pocket-vita-gxm", fe
 pocket3d-title = { path = "../vendor/pocketjs/engine/pocket3d/crates/pocket3d-title" }
 ether-voxel = { path = "../crates/ether-voxel" }
 ether-world = { path = "../crates/ether-world" }
+ether-sim = { path = "../crates/ether-sim" }
+ether-pack = { path = "../crates/ether-pack" }
+ether-mod = { path = "../crates/ether-mod" }
+# The interface (ui/): its protocol, the flow, and the channel the PocketJS guest opens in the process.
+ether-interface = { path = "../crates/ether-interface", features = ["guest"] }
+# The guest's collector is run by this runtime, at moments it chooses (`interface.rs`).
+libquickjs-sys = { git = "https://github.com/pocket-nexus/quickjs-rs.git", rev = "ba5bdd0dc013518768e76cd9e05cd30ed53dd35b" }
 serde_json = "1"
 libm = "0.2"
 

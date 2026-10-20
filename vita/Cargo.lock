@@ -28,6 +28,35 @@ dependencies = [
 ]
 
 [[package]]
+name = "ether-interface"
+version = "0.1.0"
+dependencies = [
+ "libquickjs-sys",
+]
+
+[[package]]
+name = "ether-mod"
+version = "0.1.0"
+dependencies = [
+ "ether-voxel",
+ "libquickjs-sys",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "ether-pack"
+version = "0.1.0"
+
+[[package]]
+name = "ether-sim"
+version = "0.1.0"
+dependencies = [
+ "ether-voxel",
+ "glam",
+]
+
+[[package]]
 name = "ether-voxel"
 version = "0.1.0"
 dependencies = [
@@ -95,9 +124,14 @@ checksum = "cf8baf1c55e62ffcace7a9f06f4bd9cd3f0c4beb022d3b367256b91b87513d98"
 name = "pocket-ethertum-vita"
 version = "0.1.0"
 dependencies = [
+ "ether-interface",
+ "ether-mod",
+ "ether-pack",
+ "ether-sim",
  "ether-voxel",
  "ether-world",
  "libm",
+ "libquickjs-sys",
  "pocket-vita-gxm",
  "pocket3d-title",
  "pocketjs-vita",

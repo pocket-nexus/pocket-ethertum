@@ -15,7 +15,8 @@ float3 light_of(float3 n, float ao, float4 frame[4])
     return (amb + frame[3].rgb * sun) * ao * 0.5;
 }
 
-// The world fades into the sky over the last 40% of the loaded distance.
+// The world fades into the sky over the last 40% of the loaded distance. The fade is an alpha: a chunk in that
+// band is blended over the sky picture already drawn behind it, so far terrain dissolves into the picture itself.
 float fog_of(float3 p, float4 frame[4])
 {
     float d = saturate((length(p) * frame[1].w - 0.6) * 2.5);

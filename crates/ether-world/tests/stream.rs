@@ -31,7 +31,7 @@ fn small() -> World {
 #[test]
 fn streams_to_a_meshed_radius() {
     let mut w = small();
-    let mut worker = Worker::new(w.terrain.clone());
+    let mut worker = Worker::new();
     let (gens, meshes) = settle(&mut w, &mut worker, IVec3::ZERO);
     // Radius 1 meshed, generated to 3: 7³ chunks.
     assert_eq!(gens, 343);
@@ -44,7 +44,7 @@ fn streams_to_a_meshed_radius() {
 #[test]
 fn moving_drops_far_chunks_and_meshes_new_ones() {
     let mut w = small();
-    let mut worker = Worker::new(w.terrain.clone());
+    let mut worker = Worker::new();
     settle(&mut w, &mut worker, IVec3::ZERO);
     let (_, meshes) = settle(&mut w, &mut worker, ivec3(5, 0, 0));
     assert_eq!(meshes, 27);
@@ -59,7 +59,7 @@ fn moving_drops_far_chunks_and_meshes_new_ones() {
 #[test]
 fn an_edit_remeshes_the_chunks_that_read_it() {
     let mut w = small();
-    let mut worker = Worker::new(w.terrain.clone());
+    let mut worker = Worker::new();
     settle(&mut w, &mut worker, IVec3::ZERO);
     // A voxel at a chunk corner is read by 8 meshes.
     assert!(w.edit(ivec3(0, 0, 0), |v| *v = Vox::new(tex::DIRT, ether_voxel::vox::Shape::Cube, 0.0)));
@@ -74,7 +74,7 @@ fn an_edit_remeshes_the_chunks_that_read_it() {
 #[test]
 fn edited_chunks_come_back() {
     let mut w = small();
-    let mut worker = Worker::new(w.terrain.clone());
+    let mut worker = Worker::new();
     settle(&mut w, &mut worker, IVec3::ZERO);
     let p = ivec3(3, 4, 5);
     w.edit(p, |v| *v = Vox::new(tex::LOG, ether_voxel::vox::Shape::Cube, 0.0));
@@ -88,7 +88,7 @@ fn edited_chunks_come_back() {
 #[test]
 fn collision_triangles_cover_the_ground() {
     let mut w = small();
-    let mut worker = Worker::new(w.terrain.clone());
+    let mut worker = Worker::new();
     settle(&mut w, &mut worker, IVec3::ZERO);
     let mut tris = Vec::new();
     w.triangles(Vec3::splat(-8.0), Vec3::splat(8.0), &mut tris);
@@ -98,7 +98,7 @@ fn collision_triangles_cover_the_ground() {
 #[test]
 fn save_round_trip() {
     let mut w = small();
-    let mut worker = Worker::new(w.terrain.clone());
+    let mut worker = Worker::new();
     settle(&mut w, &mut worker, IVec3::ZERO);
     w.edit(ivec3(1, 1, 1), |v| v.tex = tex::SAND);
     for (_, v) in w.kept() {

@@ -56,37 +56,42 @@ impl Radius {
 
 /// Work a host runs off the world's thread.
 pub enum Job {
-    /// Generate the chunk with this index.
-    Generate { at: IVec3 },
+    /// Generate the chunk with this index, by these generation parameters (a mod can change them between jobs).
+    Generate { at: IVec3, terrain: Arc<Terrain> },
     /// Mesh the chunk from its pad; `rev` is the chunk's revision the pad was copied at.
     Mesh { at: IVec3, rev: u32, pad: Box<Pad> },
 }
 
 /// What a job produced.
 pub enum Done {
-    Generated { at: IVec3, voxels: Box<Voxels> },
+    Generated { at: IVec3, voxels: Box<Voxels>, terrain: Arc<Terrain> },
     Meshed { at: IVec3, rev: u32, mesh: ChunkMesh, pad: Box<Pad> },
 }
 
 /// A worker's scratch.
 pub struct Worker {
-    pub terrain: Arc<Terrain>,
     builder: Builder,
     scratch: Box<Scratch>,
 }
 
+impl Default for Worker {
+    fn default() -> Self {
+        Worker::new()
+    }
+}
+
 impl Worker {
-    pub fn new(terrain: Arc<Terrain>) -> Worker {
-        Worker { terrain, builder: Builder::new(), scratch: Box::new([0.0; 4096]) }
+    pub fn new() -> Worker {
+        Worker { builder: Builder::new(), scratch: Box::new([0.0; 4096]) }
     }
 
     /// Runs a job.
     pub fn run(&mut self, job: Job) -> Done {
         match job {
-            Job::Generate { at } => {
+            Job::Generate { at, terrain } => {
                 let mut voxels: Box<Voxels> = Box::new([Vox::AIR; 4096]);
-                self.terrain.generate(at * LEN, &mut voxels, &mut self.scratch);
-                Done::Generated { at, voxels }
+                terrain.generate(at * LEN, &mut voxels, &mut self.scratch);
+                Done::Generated { at, voxels, terrain }
             }
             Job::Mesh { at, rev, pad } => {
                 let mesh = self.builder.build(&pad);
@@ -97,8 +102,8 @@ impl Worker {
 }
 
 /// Runs a job on a fresh worker (for tests and hosts with one thread).
-pub fn run(terrain: &Arc<Terrain>, job: Job) -> Done {
-    Worker::new(terrain.clone()).run(job)
+pub fn run(job: Job) -> Done {
+    Worker::new().run(job)
 }
 
 struct Slot {
@@ -155,6 +160,13 @@ pub struct World {
     /// The order chunks are wanted in, around the centre (the reference's centre spread).
     spread: Vec<IVec3>,
     spread_for: Radius,
+    /// Every position of `spread` before this index is loaded or being generated, for the centre `cursor_at`.
+    cursor: usize,
+    cursor_at: Option<IVec3>,
+    /// Chunks whose mesh is behind their revision (or that have none), and the jobs out.
+    dirty: HashSet<IVec3>,
+    generating: usize,
+    meshing: usize,
 }
 
 /// Rings of chunks generated beyond the meshed radius: one for population's neighbours, one for theirs.
@@ -173,6 +185,19 @@ impl World {
             pad_pool: Vec::new(),
             spread: Vec::new(),
             spread_for: Radius { h: -1, v: -1 },
+            cursor: 0,
+            cursor_at: None,
+            dirty: HashSet::new(),
+            generating: 0,
+            meshing: 0,
+        }
+    }
+
+    /// A chunk's mesh is out of date.
+    fn touch(&mut self, at: IVec3) {
+        if let Some(s) = self.slots.get_mut(&at) {
+            s.rev = s.rev.wrapping_add(1);
+            self.dirty.insert(at);
         }
     }
 
@@ -227,9 +252,7 @@ impl World {
         for dx in sx.0..=sx.1 {
             for dy in sy.0..=sy.1 {
                 for dz in sz.0..=sz.1 {
-                    if let Some(s) = self.slots.get_mut(&(at + IVec3::new(dx, dy, dz))) {
-                        s.rev = s.rev.wrapping_add(1);
-                    }
+                    self.touch(at + IVec3::new(dx, dy, dz));
                 }
             }
         }
@@ -240,36 +263,38 @@ impl World {
     /// returns jobs: generation of the nearest missing chunks up to `generate` jobs out at once, meshing of the
     /// nearest chunks whose mesh is out of date up to `mesh` jobs out at once (edited chunks first).
     pub fn plan(&mut self, center: IVec3, generate: usize, mesh: usize) -> Vec<Job> {
-        self.center = center;
         let outer = self.radius.grow(MARGIN);
         if self.spread_for != outer {
             self.spread = World::spread(outer);
             self.spread_for = outer;
+            self.cursor_at = None;
         }
-        // Leave a ring of slack before dropping, so standing on a border does not churn.
-        let keep = outer.grow(1);
-        let gone: Vec<IVec3> = self.slots.iter().filter(|(at, s)| !keep.contains(**at - center) && !s.generating && !s.meshing).map(|(at, _)| *at).collect();
-        for at in gone {
-            let s = self.slots.remove(&at).unwrap();
-            if s.edited {
-                if let Some(v) = s.voxels {
-                    self.kept.insert(at, v);
+        if self.cursor_at != Some(center) {
+            self.center = center;
+            self.cursor = 0;
+            self.cursor_at = Some(center);
+            // Leave a ring of slack before dropping, so standing on a border does not churn.
+            let keep = outer.grow(1);
+            let gone: Vec<IVec3> = self.slots.iter().filter(|(at, s)| !keep.contains(**at - center) && !s.generating && !s.meshing).map(|(at, _)| *at).collect();
+            for at in gone {
+                let s = self.slots.remove(&at).unwrap();
+                self.dirty.remove(&at);
+                if s.edited {
+                    if let Some(v) = s.voxels {
+                        self.kept.insert(at, v);
+                    }
                 }
-            }
-            if s.meshed.is_some() {
-                self.unloaded.push(at);
+                if s.meshed.is_some() {
+                    self.unloaded.push(at);
+                }
             }
         }
 
         let mut jobs = Vec::new();
-        let mut generating = self.slots.values().filter(|s| s.generating).count();
-        let mut meshing = self.slots.values().filter(|s| s.meshing).count();
         let mut restored = Vec::new();
-        for i in 0..self.spread.len() {
-            if generating >= generate {
-                break;
-            }
-            let at = center + self.spread[i];
+        while self.cursor < self.spread.len() && self.generating < generate {
+            let at = center + self.spread[self.cursor];
+            self.cursor += 1;
             if self.slots.contains_key(&at) {
                 continue;
             }
@@ -279,41 +304,46 @@ impl World {
                 s.populated = true;
                 s.edited = true;
                 self.slots.insert(at, s);
+                self.dirty.insert(at);
                 restored.push(at);
                 continue;
             }
             let mut s = Slot::new();
             s.generating = true;
             self.slots.insert(at, s);
-            jobs.push(Job::Generate { at });
-            generating += 1;
+            jobs.push(Job::Generate { at, terrain: self.terrain.clone() });
+            self.generating += 1;
         }
         for at in restored {
             self.after_arrival(at);
         }
 
-        // Meshing: edited chunks first, then by distance.
-        let mut want: Vec<(bool, i32, IVec3)> = Vec::new();
-        for (at, s) in &self.slots {
-            if s.meshing || !s.populated || s.meshed == Some(s.rev) || !self.radius.contains(*at - center) {
-                continue;
+        // Meshing: edited chunks first, then by distance, among the chunks whose mesh is out of date.
+        if self.meshing < mesh && !self.dirty.is_empty() {
+            let mut want: Vec<(bool, i32, IVec3)> = Vec::new();
+            for at in &self.dirty {
+                let Some(s) = self.slots.get(at) else { continue };
+                if s.meshing || !s.populated || !self.radius.contains(*at - center) {
+                    continue;
+                }
+                want.push((!s.edited, (*at - center).abs().max_element(), *at));
             }
-            want.push((!s.edited, (*at - center).abs().max_element(), *at));
-        }
-        want.sort_unstable_by_key(|w| (w.0, w.1, w.2.to_array()));
-        for (_, _, at) in want {
-            if meshing >= mesh {
-                break;
+            want.sort_unstable_by_key(|w| (w.0, w.1, w.2.to_array()));
+            for (_, _, at) in want {
+                if self.meshing >= mesh {
+                    break;
+                }
+                if !self.neighbours(at, |s| s.populated) {
+                    continue;
+                }
+                let mut pad = self.pad_pool.pop().unwrap_or_else(|| Box::new(Pad::new()));
+                self.fill(at, &mut pad);
+                let s = self.slots.get_mut(&at).unwrap();
+                s.meshing = true;
+                self.meshing += 1;
+                self.dirty.remove(&at);
+                jobs.push(Job::Mesh { at, rev: s.rev, pad });
             }
-            if !self.neighbours(at, |s| s.populated) {
-                continue;
-            }
-            let mut pad = self.pad_pool.pop().unwrap_or_else(|| Box::new(Pad::new()));
-            self.fill(at, &mut pad);
-            let s = self.slots.get_mut(&at).unwrap();
-            s.meshing = true;
-            jobs.push(Job::Mesh { at, rev: s.rev, pad });
-            meshing += 1;
         }
         jobs
     }
@@ -322,7 +352,12 @@ impl World {
     /// may have left the radius meanwhile).
     pub fn finish(&mut self, done: Done) -> Option<(IVec3, ChunkMesh)> {
         match done {
-            Done::Generated { at, voxels } => {
+            Done::Generated { at, voxels, terrain } => {
+                // Generated by parameters that were replaced since: the chunk is asked for again.
+                if !Arc::ptr_eq(&terrain, &self.terrain) {
+                    return None;
+                }
+                self.generating = self.generating.saturating_sub(1);
                 let Some(s) = self.slots.get_mut(&at) else { return None };
                 s.generating = false;
                 s.voxels = Some(voxels);
@@ -331,9 +366,13 @@ impl World {
             }
             Done::Meshed { at, rev, mesh, pad } => {
                 self.pad_pool.push(pad);
+                self.meshing = self.meshing.saturating_sub(1);
                 let s = self.slots.get_mut(&at)?;
                 s.meshing = false;
                 s.meshed = Some(rev);
+                if s.rev != rev {
+                    self.dirty.insert(at);
+                }
                 s.collision = Arc::new(mesh.collision.clone());
                 Some((at, mesh))
             }
@@ -382,8 +421,7 @@ impl World {
         drop(hood);
         drop(copies);
         for slot in 0..27 {
-            let s = self.slots.get_mut(&(at + hood_dir(slot))).unwrap();
-            s.rev = s.rev.wrapping_add(1);
+            self.touch(at + hood_dir(slot));
         }
         self.slots.get_mut(&at).unwrap().populated = true;
     }
@@ -440,6 +478,11 @@ impl World {
         if let Some(d) = decor {
             self.decor = Decor::new(d);
         }
+        self.cursor_at = None;
+        self.dirty.clear();
+        // Jobs out return to a world that no longer has their slots; their counts are given back here.
+        self.generating = 0;
+        self.meshing = 0;
         let all: Vec<IVec3> = self.slots.keys().copied().collect();
         for at in all {
             let s = self.slots.remove(&at).unwrap();
@@ -456,8 +499,9 @@ impl World {
 
     /// Marks every loaded mesh out of date (after a change of how materials look).
     pub fn remesh_all(&mut self) {
-        for s in self.slots.values_mut() {
-            s.rev = s.rev.wrapping_add(1);
+        let all: Vec<IVec3> = self.slots.keys().copied().collect();
+        for at in all {
+            self.touch(at);
         }
     }
 

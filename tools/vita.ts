@@ -2,7 +2,8 @@
 // over PocketJS's wired debug transport (vendor/pocketjs), steer and measure.
 //
 //   bun tools/vita.ts build   [--title P3B1D7273] [--debug]
-//   bun tools/vita.ts native                      # build + USB SELF replacement
+//   bun tools/vita.ts sync                        # pack, compiled interface and mods → host0:ether/
+//   bun tools/vita.ts native                      # sync + build + USB SELF replacement
 //   bun tools/vita.ts serve                       # USB host (keep running, detached)
 //   bun tools/vita.ts status | capture [--out f.png]
 //   bun tools/vita.ts ctl '{"pos":[0,40,0]}'      # host0:ether/control.json
@@ -104,6 +105,40 @@ function prepareShare(argv: string[]) {
   for (const dir of ["", "gxp"]) mkdirSync(`${c.appShare}/${dir}`, { recursive: true });
 }
 
+/**
+ * Copies to the share what the device reads there: the pack (`bun tools/cook.ts` makes it), the compiled
+ * interface (`bun tools/ui.ts vita`) and the mods under `mods/` (with an `index.txt`, since the USB share cannot
+ * list a directory). A file is copied when its bytes differ from the share's copy.
+ */
+export async function sync(argv: string[]): Promise<void> {
+  const c = context(argv);
+  prepareShare(argv);
+  const sha = (p: string) => createHash("sha256").update(readFileSync(p)).digest("hex");
+  const put = (src: string, dst: string) => {
+    if (existsSync(dst) && sha(dst) === sha(src)) return;
+    mkdirSync(resolve(dst, ".."), { recursive: true });
+    cpSync(src, dst);
+    console.log(`ether: synced ${dst.slice(c.share.length + 1)}`);
+  };
+  const pack = resolve(ROOT, ".pocket-build/pack/ether.pack");
+  if (!existsSync(pack)) await $`bun ${ROOT}/tools/cook.ts`.cwd(ROOT);
+  put(pack, `${c.appShare}/ether.pack`);
+  await $`bun ${ROOT}/tools/ui.ts vita`.cwd(ROOT).quiet();
+  for (const name of ["ether.js", "ether.pak"]) put(resolve(ROOT, ".pocket-build/ui/vita", name), `${c.appShare}/${name}`);
+  // Mods besides the base one, which is compiled in: every directory of mods/ with a main.js, except base and examples.
+  const { readdirSync } = await import("node:fs");
+  const names = readdirSync(resolve(ROOT, "mods"), { withFileTypes: true }).filter((d) => d.isDirectory() && d.name !== "base" && d.name !== "examples" && existsSync(resolve(ROOT, "mods", d.name, "main.js"))).map((d) => d.name);
+  const extra = (process.env.ETHER_MODS ?? "").split(",").filter(Boolean);
+  mkdirSync(`${c.appShare}/mods`, { recursive: true });
+  for (const name of extra) {
+    const src = existsSync(resolve(ROOT, "mods", name, "main.js")) ? resolve(ROOT, "mods", name, "main.js") : resolve(ROOT, "mods/examples", name, "main.js");
+    put(src, `${c.appShare}/mods/${name}/main.js`);
+  }
+  for (const name of names) put(resolve(ROOT, "mods", name, "main.js"), `${c.appShare}/mods/${name}/main.js`);
+  const index = [...names, ...extra].join("\n") + "\n";
+  if (!existsSync(`${c.appShare}/mods/index.txt`) || readFileSync(`${c.appShare}/mods/index.txt`, "utf8") !== index) writeFileSync(`${c.appShare}/mods/index.txt`, index);
+}
+
 export function ctl(argv: string[], json: string): void {
   const c = context(argv);
   mkdirSync(c.appShare, { recursive: true });
@@ -144,8 +179,11 @@ if (import.meta.main) {
     case "build":
       await build(argv);
       break;
+    case "sync":
+      await sync(argv);
+      break;
     case "native":
-      prepareShare(argv);
+      await sync(argv);
       await build(argv);
       await dev(argv, "native");
       break;

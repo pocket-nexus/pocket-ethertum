@@ -1,12 +1,9 @@
 uniform sampler2D uTex;
-// rgb: the fog's colour
-uniform float4 uFog;
 
 half4 main(float2 vUvX : TEXCOORD0, float2 vUvY : TEXCOORD1, float2 vUvZ : TEXCOORD2, half4 vBlend : COLOR0, half4 vLight : COLOR1) : COLOR
 {
     half3 c = (half3)tex2D(uTex, vUvX).rgb * vBlend.x + (half3)tex2D(uTex, vUvY).rgb * vBlend.y + (half3)tex2D(uTex, vUvZ).rgb * vBlend.z;
     c = c * vLight.rgb * (half)2.0;
-    c = lerp(c, (half3)uFog.rgb, vLight.a);
-    // Alpha is the batch material's weight: 1 in an opaque batch, a gradient across a layer.
-    return half4(c, vBlend.a);
+    // Alpha: the batch material's weight (1 in a base batch, a gradient across a layer), faded by distance.
+    return half4(c, vBlend.a * ((half)1.0 - vLight.a));
 }

@@ -174,15 +174,24 @@ pub enum Cull {
 /// Depth-tested and written: opaque geometry.
 pub unsafe fn state_opaque(ctx: *mut g::SceGxmContext, cull: Cull) {
     depth(ctx, g::SceGxmDepthFunc_SCE_GXM_DEPTH_FUNC_LESS_EQUAL, true);
-    // Ethertum's triangles wind counter-clockwise seen from outside; GXM's y points down the screen after the
-    // viewport flip, which turns that into clockwise.
-    g::sceGxmSetCullMode(ctx, if cull == Cull::Back { g::SceGxmCullMode_SCE_GXM_CULL_CCW } else { g::SceGxmCullMode_SCE_GXM_CULL_NONE });
+    g::sceGxmSetCullMode(ctx, back(cull));
 }
 
 /// Depth-tested, not written: blended geometry.
 pub unsafe fn state_blend(ctx: *mut g::SceGxmContext, cull: Cull) {
     depth(ctx, g::SceGxmDepthFunc_SCE_GXM_DEPTH_FUNC_LESS_EQUAL, false);
-    g::sceGxmSetCullMode(ctx, if cull == Cull::Back { g::SceGxmCullMode_SCE_GXM_CULL_CCW } else { g::SceGxmCullMode_SCE_GXM_CULL_NONE });
+    g::sceGxmSetCullMode(ctx, back(cull));
+}
+
+/// Ethertum's triangles wind counter-clockwise seen from their front (Bevy's convention). GXM tells winding in
+/// the projected coordinates before the viewport's flip of y, so that front stays counter-clockwise and the back
+/// to cull is clockwise (seen on the console: culling CCW drew the inside of the sea).
+fn back(cull: Cull) -> u32 {
+    if cull == Cull::Back {
+        g::SceGxmCullMode_SCE_GXM_CULL_CW
+    } else {
+        g::SceGxmCullMode_SCE_GXM_CULL_NONE
+    }
 }
 
 /// No depth test or write, two-sided: the sky, and vita2d's own draws.
