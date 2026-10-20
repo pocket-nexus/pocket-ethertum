@@ -12,3 +12,4 @@ node_modules/
 # The interface's build state
 /ui/.pocket/
 /ui/app/generated/
+/bench/reference/target/

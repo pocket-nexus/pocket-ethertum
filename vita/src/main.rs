@@ -501,6 +501,9 @@ fn main() {
         let mut edits = 0u32;
         let mut reloads = 0u32;
         let mut show = [true; 3];
+        let mut held_frames = 0u32;
+        let mut rescues = 0u32;
+        let mut safe = player.position;
 
         loop {
             let raw = input::read();
@@ -638,7 +641,25 @@ fn main() {
                     use_item: input.use_item,
                     hotbar: 0,
                 };
-                player.step(&Ground(&mut world), &ppad, dt);
+                // The player collides with the meshes' triangles: until the chunk it is in and the one under it
+                // are meshed there is nothing to stand on, and it waits. A fall far below the last place it stood
+                // (into rock that has no surface, under a chunk that was not meshed in time) brings it back there.
+                let here = World::chunk_index(player.position);
+                let ready = world.is_meshed(here) && world.is_meshed(here - IVec3::Y);
+                if ready || player.flying {
+                    player.step(&Ground(&mut world), &ppad, dt);
+                } else {
+                    held_frames += 1;
+                }
+                if player.grounded {
+                    safe = player.position;
+                }
+                if player.position.y < safe.y - 256.0 {
+                    player.position = safe + Vec3::new(0.0, 2.0, 0.0);
+                    player.velocity = Vec3::ZERO;
+                    player.flying = true;
+                    rescues += 1;
+                }
                 camera.distance.target = session.camera_distance();
                 camera.base_fov = session.fov();
                 camera.follow(&player, dt);
@@ -800,7 +821,7 @@ fn main() {
                     "workerMs": {"generate": gen_ms, "mesh": mesh_ms},
                     "scene": {"byPass": {"terrain": stats.by_pass[0], "layers": stats.by_pass[1], "water": stats.by_pass[2], "foliage": stats.by_pass[3]}, "chunks": stats.chunks, "culled": stats.culled, "draws": stats.draws, "tris": stats.tris, "resident": scene.len(), "heapBytes": scene.bytes(), "heapPeak": scene.heap.peak, "heapLargest": scene.heap.largest(), "uploadsFailed": uploads_failed, "textureBytes": scene.textures.bytes},
                     "world": {"chunks": ws.chunks, "generated": ws.generated, "populated": ws.populated, "meshed": ws.meshed, "generating": ws.generating, "meshing": ws.meshing, "kept": ws.kept, "radius": [world.radius.h, world.radius.v], "restored": restored, "edits": edits},
-                    "player": {"pos": player.position.to_array(), "vel": player.velocity.to_array(), "yaw": player.yaw, "pitch": player.pitch, "flying": player.flying, "grounded": player.grounded, "sprinting": player.sprinting},
+                    "player": {"held": held_frames, "rescues": rescues, "safe": safe.to_array(), "pos": player.position.to_array(), "vel": player.velocity.to_array(), "yaw": player.yaw, "pitch": player.pitch, "flying": player.flying, "grounded": player.grounded, "sprinting": player.sprinting},
                     "hit": {"is": hit.is_hit, "voxel": hit.voxel_pos.to_array(), "distance": hit.distance},
                     "clock": {"daytime": clock.daytime, "dayLength": clock.day_length},
                     "mods": {"loaded": reg.mods, "commands": reg.commands, "reloads": reloads, "notices": notices, "memory": mods.memory().map(|m| m.malloc_size)},

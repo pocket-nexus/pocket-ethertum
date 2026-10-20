@@ -1,0 +1,22 @@
+[package]
+name = "ether-refbench"
+version = "0.1.0"
+edition = "2021"
+license = "GPL-3.0-only"
+publish = false
+description = "Runs the reference (ref/ethertum) on this computer and measures it: its frame time at its default load distance, a picture at a fixed pose, and its world generation and meshing against ether-voxel's"
+
+# Bevy is built only for this measurement, outside the repository's workspace.
+[workspace]
+
+[dependencies]
+ethertia = { path = "../../ref/ethertum" }
+ether-voxel = { path = "../../crates/ether-voxel" }
+bevy = { version = "0.19.1", features = ["bevy_solari", "jpeg"] }
+avian3d = "0.7"
+bevy_renet = "5.0"
+serde_json = "1"
+
+[profile.release]
+opt-level = 3
+codegen-units = 16
