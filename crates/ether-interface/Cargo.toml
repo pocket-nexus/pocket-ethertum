@@ -4,6 +4,11 @@ version = "0.1.0"
 edition = "2021"
 license = "GPL-3.0-only"
 publish = false
-description = "The interface's renderer side: protocol, the in-process channel, and Session, the flow"
+description = "The interface's renderer side: the protocol of ui/, the in-process channel a PocketJS guest opens, and Session, the flow"
+
+[features]
+# The guest's service ops answered through the QuickJS API (the Vita, whose PocketJS host is Rust).
+guest = ["dep:libquickjs-sys"]
 
 [dependencies]
+libquickjs-sys = { git = "https://github.com/pocket-nexus/quickjs-rs.git", rev = "ba5bdd0dc013518768e76cd9e05cd30ed53dd35b", optional = true }

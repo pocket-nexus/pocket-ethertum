@@ -1,0 +1,20 @@
+{
+  "$schema": "https://pocketjs.dev/schema/pocket-2.json",
+  "pocket": 2,
+  "id": "dev.pocket-nexus.ethertum",
+  "name": "pocket-ethertum",
+  "title": "Pocket Ethertum",
+  "version": "0.1.0",
+  "engine": {
+    "capabilities": {
+      "requires": ["text.glyphs.baked"],
+      "enhances": ["input.buttons", "input.touch", "input.analog.left"]
+    }
+  },
+  "app": {
+    "entry": "app/main.tsx",
+    "output": "ether",
+    "framework": "solid",
+    "viewport": { "logical": [480, 272], "presentation": "integer-fit" }
+  }
+}
