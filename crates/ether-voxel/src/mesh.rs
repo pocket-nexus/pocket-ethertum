@@ -49,8 +49,14 @@ impl Pad {
 
     /// Copies the centre chunk of `hood` and its border. A missing neighbour leaves empty voxels.
     pub fn fill(&mut self, hood: &Hood) {
+        self.fill_from(|slot| hood.chunks[slot].as_deref());
+    }
+
+    /// Copies the chunk and its border from the 27 chunks `chunk(slot)` gives (slots as [`crate::chunk::hood_slot`]).
+    pub fn fill_from<'a>(&mut self, chunk: impl Fn(usize) -> Option<&'a crate::chunk::Voxels>) {
+        let chunks: [Option<&crate::chunk::Voxels>; 27] = core::array::from_fn(&chunk);
         self.present = 0;
-        for (slot, c) in hood.chunks.iter().enumerate() {
+        for (slot, c) in chunks.iter().enumerate() {
             if c.is_some() {
                 self.present |= 1 << slot;
             }
@@ -58,8 +64,9 @@ impl Pad {
         for x in -BORDER..LEN + BORDER {
             for y in -BORDER..LEN + BORDER {
                 for z in -BORDER..LEN + BORDER {
-                    let p = ivec3(x, y, z);
-                    self.vox[pidx(p)] = hood.get_rel_or_default(p);
+                    let d = ivec3(x >> 4, y >> 4, z >> 4);
+                    let v = chunks[crate::chunk::hood_slot(d)].map(|c| c[idx(x & 15, y & 15, z & 15)]).unwrap_or_default();
+                    self.vox[pidx(ivec3(x, y, z))] = v;
                 }
             }
         }
