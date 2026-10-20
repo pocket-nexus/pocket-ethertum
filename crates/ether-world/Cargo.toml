@@ -1,0 +1,10 @@
+[package]
+name = "ether-world"
+version = "0.1.0"
+edition = "2021"
+license = "GPL-3.0-only"
+publish = false
+description = "The loaded world: chunks streamed around the player, population and meshing scheduled, edits, collision triangles"
+
+[dependencies]
+ether-voxel = { path = "../ether-voxel" }

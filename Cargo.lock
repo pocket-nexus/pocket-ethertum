@@ -15,6 +15,24 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b53f0d33a479321da6b0caa71366c9f67e8a2c149762d90bdc0d16e601ee8ecb"
 
 [[package]]
+name = "ether-cook"
+version = "0.1.0"
+dependencies = [
+ "ether-pack",
+]
+
+[[package]]
+name = "ether-interface"
+version = "0.1.0"
+
+[[package]]
+name = "ether-mod"
+version = "0.1.0"
+dependencies = [
+ "ether-voxel",
+]
+
+[[package]]
 name = "ether-oracle"
 version = "0.1.0"
 dependencies = [
@@ -46,11 +64,29 @@ dependencies = [
 ]
 
 [[package]]
+name = "ether-pack"
+version = "0.1.0"
+
+[[package]]
+name = "ether-sim"
+version = "0.1.0"
+dependencies = [
+ "ether-voxel",
+]
+
+[[package]]
 name = "ether-voxel"
 version = "0.1.0"
 dependencies = [
  "glam",
  "libm",
+]
+
+[[package]]
+name = "ether-world"
+version = "0.1.0"
+dependencies = [
+ "ether-voxel",
 ]
 
 [[package]]

@@ -1,0 +1,10 @@
+[package]
+name = "ether-cook"
+version = "0.1.0"
+edition = "2021"
+license = "GPL-3.0-only"
+publish = false
+description = "Cooks the reference's art into the device pack"
+
+[dependencies]
+ether-pack = { path = "../ether-pack" }

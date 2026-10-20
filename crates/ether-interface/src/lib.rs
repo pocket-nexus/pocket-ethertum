@@ -1,0 +1,1 @@
+//! The interface (stub).

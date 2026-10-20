@@ -1,0 +1,9 @@
+[package]
+name = "ether-pack"
+version = "0.1.0"
+edition = "2021"
+license = "GPL-3.0-only"
+publish = false
+description = "The cooked pack's container and section layouts, read on the device without std"
+
+[dependencies]

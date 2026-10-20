@@ -1,0 +1,1 @@
+//! The loaded world (stub).

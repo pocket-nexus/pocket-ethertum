@@ -1,6 +1,19 @@
 [workspace]
 resolver = "2"
-members = ["crates/ether-voxel", "crates/ether-oracle", "crates/ether-oracle/shim-bevy", "crates/ether-oracle/shim-egui", "crates/ether-oracle/derive"]
+members = [
+    "crates/ether-voxel",
+    "crates/ether-world",
+    "crates/ether-sim",
+    "crates/ether-pack",
+    "crates/ether-cook",
+    "crates/ether-mod",
+    "crates/ether-interface",
+    "crates/ether-oracle",
+    "crates/ether-oracle/shim-bevy",
+    "crates/ether-oracle/shim-egui",
+    "crates/ether-oracle/derive",
+]
+# The device runtime builds with its own toolchain and lockfile.
 exclude = ["vita", "vendor", "ref"]
 
 # The oracle compiles the reference's chunk code, which writes voxels through `&T` cast to `&mut T`
