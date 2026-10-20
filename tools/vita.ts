@@ -9,6 +9,7 @@
 //   bun tools/vita.ts ctl '{"pos":[0,40,0]}'      # host0:ether/control.json
 //   bun tools/vita.ts boot '{"title":false}'      # host0:ether/boot.json, read at start
 //   bun tools/vita.ts bench [--seconds 60]        # frame timings → .pocket-build/validation/bench/<time>.json
+//   bun tools/vita.ts vpk                         # standalone PKET00001 package: pack, interface, programs inside
 //
 // `--share DIR` uses an already-running USB host's root directory instead of this repository's
 // `.pocket-build/vita-usb/share`. The default title is Pocket Devkit (PocketJS apps/devkit), the development
@@ -139,6 +140,33 @@ export async function sync(argv: string[]): Promise<void> {
   if (!existsSync(`${c.appShare}/mods/index.txt`) || readFileSync(`${c.appShare}/mods/index.txt`, "utf8") !== index) writeFileSync(`${c.appShare}/mods/index.txt`, index);
 }
 
+/**
+ * The standalone package: the pack, the interface and the programs the device compiled (listed in the share's
+ * `gxp/manifest.txt` by a development run) go inside the VPK, and the build carries no USB debug driver. Its
+ * mods are the compiled-in base mod and whatever the player puts under `ux0:data/pocket-ethertum/mods`.
+ */
+export async function vpk(argv: string[]): Promise<void> {
+  const c = context(argv);
+  const manifest = `${c.appShare}/gxp/manifest.txt`;
+  if (!existsSync(manifest)) throw new Error(`${manifest} missing: run the development build on the device first`);
+  const stage = resolve(ROOT, ".pocket-build/vpk");
+  const { rmSync } = await import("node:fs");
+  rmSync(stage, { recursive: true, force: true });
+  mkdirSync(`${stage}/gxp`, { recursive: true });
+  if (existsSync(`${APP_DIR}/assets`)) cpSync(`${APP_DIR}/assets`, stage, { recursive: true });
+  const hashes = readFileSync(manifest, "utf8").split("\n").filter(Boolean);
+  for (const h of hashes) {
+    const gxp = `${c.appShare}/gxp/${h}.gxp`;
+    if (!existsSync(gxp)) throw new Error(`${gxp} missing: the device has not compiled this build's programs`);
+    cpSync(gxp, `${stage}/gxp/${h}.gxp`);
+  }
+  cpSync(resolve(ROOT, ".pocket-build/pack/ether.pack"), `${stage}/ether.pack`);
+  await $`bun ${ROOT}/tools/ui.ts vita`.cwd(ROOT).quiet();
+  for (const name of ["ether.js", "ether.pak"]) cpSync(resolve(ROOT, ".pocket-build/ui/vita", name), `${stage}/${name}`);
+  console.log(`ether: staged ${hashes.length} programs, the pack and the interface in ${stage}`);
+  await build([...argv.filter((a) => a !== "--standalone"), "--standalone"], stage);
+}
+
 export function ctl(argv: string[], json: string): void {
   const c = context(argv);
   mkdirSync(c.appShare, { recursive: true });
@@ -213,6 +241,9 @@ if (import.meta.main) {
     }
     case "bench":
       await bench(argv);
+      break;
+    case "vpk":
+      await vpk(argv);
       break;
     default:
       console.log("usage: bun tools/vita.ts build|native|push|serve|status|capture|ctl|boot|bench");

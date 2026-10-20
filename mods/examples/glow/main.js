@@ -1,7 +1,9 @@
 // An example mod: a material that gives light, and two commands.
 //
 // Load it beside the base mod (see docs/MODDING.md). `glowstone` appears in
-// the hotbar's material list; the engine meshes it with light 15 around it.
+// the hotbar's material list. Its `light` is recorded in the registry; the
+// engine has no block light yet (in the reference, voxel light is a debug
+// tool), so it does not glow.
 
 ether.material({
   id: 30,
