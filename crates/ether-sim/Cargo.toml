@@ -8,3 +8,4 @@ description = "The player: Ethertum's character controller against the terrain's
 
 [dependencies]
 ether-voxel = { path = "../ether-voxel" }
+glam = { version = "0.33", default-features = false, features = ["std", "libm", "i32", "f64"] }
