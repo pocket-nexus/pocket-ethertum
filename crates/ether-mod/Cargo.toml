@@ -8,3 +8,8 @@ description = "Mods in QuickJS: the registry of materials, items and world param
 
 [dependencies]
 ether-voxel = { path = "../ether-voxel" }
+# The QuickJS build Pocket Tokyo's Vita runtime links; it cross-compiles with the Vita toolchain's
+# environment (`TARGET_CC=arm-vita-eabi-gcc`, …) and keeps the 16-byte JSValue on the Vita.
+libquickjs-sys = { git = "https://github.com/pocket-nexus/quickjs-rs.git", rev = "ba5bdd0dc013518768e76cd9e05cd30ed53dd35b" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
