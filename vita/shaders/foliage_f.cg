@@ -1,0 +1,14 @@
+uniform sampler2D uTex;
+// rgb: the fog's colour
+uniform float4 uFog;
+
+half4 main(float2 vUv : TEXCOORD0, half4 vLight : COLOR0) : COLOR
+{
+    half4 t = (half4)tex2D(uTex, vUv);
+    // The reference's cut-out: texels under half alpha are not drawn.
+    if (t.a < (half)0.5)
+        discard;
+    half3 c = t.rgb * vLight.rgb * (half)2.0;
+    c = lerp(c, (half3)uFog.rgb, vLight.a);
+    return half4(c, (half)1.0);
+}

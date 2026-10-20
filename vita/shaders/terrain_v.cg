@@ -1,4 +1,6 @@
-// The isosurface and placed cubes of one material: lit per vertex.
+// The isosurface and placed cubes of one material, textured from three sides (the reference's triplanar
+// mapping): the three projections' coordinates and their weights are computed here, so the fragment program's
+// three reads need nothing computed first.
 
 void main(
     float3 aPosition,
@@ -7,13 +9,25 @@ void main(
     float aWeight,
     uniform float4x4 uVp,
     uniform float4 uOrigin,
+    uniform float4 uUv,
     uniform float4 uFrame[4],
     out float4 oPosition : POSITION,
-    out float4 oLight : COLOR0,
-    out float4 oFog : COLOR1)
+    out float2 oUvX : TEXCOORD0,
+    out float2 oUvY : TEXCOORD1,
+    out float2 oUvZ : TEXCOORD2,
+    out float4 oBlend : COLOR0,
+    out float4 oLight : COLOR1)
 {
-    float3 p = aPosition * (1.0 / 256.0) + uOrigin.xyz;
+    float3 local = aPosition * (1.0 / 256.0);
+    float3 p = local + uOrigin.xyz;
     oPosition = mul(uVp, float4(p, 1.0));
-    oLight = float4(light_of(aNormal, aAo, uFrame), aWeight);
-    oFog = float4(0.0, 0.0, 0.0, fog_of(p, uFrame));
+    // uUv.xyz: the chunk corner's texture coordinates, wrapped; uUv.w: 1 / the reference's sample scale (1.5).
+    float3 t = uUv.xyz + local * uUv.w;
+    oUvX = float2(-t.z, -t.y);
+    oUvY = float2(t.x, t.z);
+    oUvZ = float2(t.x, -t.y);
+    float3 b = pow(abs(aNormal), 4.5);
+    b /= (b.x + b.y + b.z);
+    oBlend = float4(b, aWeight);
+    oLight = float4(light_of(aNormal, aAo, uFrame), fog_of(p, uFrame));
 }

@@ -1,12 +1,26 @@
-// [0] rgb: the water's colour, a: its opacity; [1] rgb: the fog's colour; [2] rgb: the sky at the horizon
-uniform float4 uLook[3];
+uniform sampler2D uNormals;
+// [0] rgb: the water's own colour; [1] rgb: the fog's colour; [2] rgb: the sky overhead; [3] rgb: the sky at the
+// horizon, w: the sun's strength; [4] xyz: towards the sun
+uniform float4 uLook[5];
 
-half4 main(half4 vLight : COLOR0, float4 vView : TEXCOORD0) : COLOR
+float2 octave(float2 uv)
 {
+    // R and G hold the normal's x and z.
+    return tex2D(uNormals, uv).rg * 2.0 - 1.0;
+}
+
+half4 main(float2 vN0 : TEXCOORD0, float2 vN1 : TEXCOORD1, float2 vN2 : TEXCOORD2, float4 vView : TEXCOORD3, half4 vLight : COLOR0) : COLOR
+{
+    // The octaves' strengths are the reference's (0.16, 0.18, 0.093); a side face keeps its own flat normal.
+    float2 xz = octave(vN0) * 0.16 + octave(vN1) * 0.18 + octave(vN2) * 0.093;
+    float top = saturate(vView.w);
+    float3 n = normalize(float3(xz.x * top, 1.0, xz.y * top));
     float3 v = normalize(vView.xyz);
-    // Schlick's Fresnel term for a face that looks up, from how steeply it is seen.
-    half f = (half)(0.02 + 0.98 * pow(1.0 - saturate(abs(v.y)), 5.0)) * (half)saturate(vView.w);
-    half3 c = lerp((half3)uLook[0].rgb * vLight.rgb, (half3)uLook[2].rgb, f);
-    c = lerp(c, (half3)uLook[1].rgb, vLight.a);
-    return half4(c, lerp((half)uLook[0].a, (half)1.0, f));
+    float fresnel = 0.02 + 0.98 * pow(1.0 - saturate(abs(dot(n, v))), 5.0);
+    float3 r = reflect(-v, n);
+    float3 sky = lerp(uLook[3].rgb, uLook[2].rgb, sqrt(saturate(r.y)));
+    float spec = pow(saturate(dot(r, uLook[4].xyz)), 300.0) * uLook[3].w * 4.0;
+    float3 c = lerp(uLook[0].rgb * vLight.rgb * 2.0, sky, fresnel * top) + spec;
+    c = lerp(c, uLook[1].rgb, vLight.a);
+    return half4((half3)c, (half)1.0);
 }

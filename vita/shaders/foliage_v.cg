@@ -1,0 +1,22 @@
+// Crossed cards of tall grass, flowers and leaves. Each vertex sways as the reference's foliage program moves
+// it: by the cosine of its own position (×1000) and the time, 0.16 voxel at most. The reference lights them as
+// faces that look up.
+
+void main(
+    float3 aPosition,
+    float2 aUv,
+    float aAo,
+    uniform float4x4 uVp,
+    uniform float4 uOrigin,
+    uniform float4 uFrame[4],
+    out float4 oPosition : POSITION,
+    out float2 oUv : TEXCOORD0,
+    out float4 oLight : COLOR0)
+{
+    float3 local = aPosition * (1.0 / 256.0);
+    local += cos(local.yzx * 1000.0 + uFrame[2].w * 0.8) * 0.16;
+    float3 p = local + uOrigin.xyz;
+    oPosition = mul(uVp, float4(p, 1.0));
+    oUv = aUv;
+    oLight = float4(light_of(float3(0.0, 1.0, 0.0), aAo, uFrame), fog_of(p, uFrame));
+}

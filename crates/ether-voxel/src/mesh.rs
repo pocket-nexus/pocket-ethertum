@@ -396,7 +396,7 @@ pub struct TerrainVertex {
     pub _pad: [u8; 2],
 }
 
-/// A foliage vertex: position, atlas coordinates (1/65535 of the atlas), light. 12 bytes.
+/// A foliage vertex: position, coordinates in the device's foliage atlas (1/65535 of it), occlusion. 12 bytes.
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct FoliageVertex {
@@ -473,6 +473,22 @@ fn fixed(p: Vec3) -> [i16; 3] {
 fn snorm(n: Vec3) -> [i8; 3] {
     let f = |v: f32| libm::roundf(v.clamp(-1.0, 1.0) * 127.0) as i8;
     [f(n.x), f(n.y), f(n.z)]
+}
+
+/// Columns and rows of 128² tiles in the device's foliage atlas (`ether-pack`'s `FOLI`: 1024 × 512, tile `t` at
+/// column `t % 8`, row `t / 8`).
+pub const FOLIAGE_COLUMNS: u32 = 8;
+pub const FOLIAGE_ROWS: u32 = 4;
+
+/// A foliage vertex's coordinates in the device atlas. The reference addresses a strip of 24 tiles
+/// (`u = (f + t) / 24`); the tile is the card's voxel's material (the voxel index is in the vertex key) and `f`,
+/// the side of the card, is what `u` has beyond it.
+fn atlas_uv(pad: &Pad, key: u32, uv: Vec2) -> (f32, f32) {
+    let voxel = (key >> 5) as i32;
+    let tex = pad.at(ivec3((voxel >> 8) & 15, (voxel >> 4) & 15, voxel & 15)).tex.max(1) as u32;
+    let t = tex - 1;
+    let f = libm::roundf(uv.x * 24.0 - t as f32).clamp(0.0, 1.0);
+    ((((t % FOLIAGE_COLUMNS) as f32) + f) / FOLIAGE_COLUMNS as f32, (((t / FOLIAGE_COLUMNS) as f32) + uv.y) / FOLIAGE_ROWS as f32)
 }
 
 /// Occlusion at a point: the share of non-empty voxels in the 4×4×4 block around it, as 255 (open) to 0.
@@ -644,8 +660,9 @@ impl Builder {
             let verts = &mut out.foliage.vertices;
             let at = self.keys.get_or(*key as u64, || {
                 let i = verts.len() as u16;
+                let (u, w) = atlas_uv(pad, *key, v.uv);
                 let uv = |f: f32| libm::roundf(f.clamp(0.0, 1.0) * 65535.0) as u16;
-                verts.push(FoliageVertex { pos: fixed(v.pos), uv: [uv(v.uv.x), uv(v.uv.y)], ao: occlusion(pad, v.pos), _pad: 0 });
+                verts.push(FoliageVertex { pos: fixed(v.pos), uv: [uv(u), uv(w)], ao: occlusion(pad, v.pos), _pad: 0 });
                 i
             });
             out.foliage.indices.push(at);

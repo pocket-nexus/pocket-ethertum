@@ -1,12 +1,11 @@
-// [0] rgb: zenith; [1] rgb: horizon; [2] xyz: towards the sun, w: the sun's strength; [3] rgb: the sun's glow
-uniform float4 uSky[4];
+uniform sampler2D uTex;
+// rgb: daylight on the sky picture; a: unused
+uniform float4 uTint;
+// rgb: the night's own colour
+uniform float4 uNight;
 
-half4 main(float3 vDirection : TEXCOORD0) : COLOR
+half4 main(float2 vUv : TEXCOORD0) : COLOR
 {
-    float3 d = normalize(vDirection);
-    float up = saturate(d.y);
-    half3 c = lerp((half3)uSky[1].rgb, (half3)uSky[0].rgb, (half)sqrt(up));
-    float s = saturate(dot(d, uSky[2].xyz));
-    c += (half3)uSky[3].rgb * (half)(pow(s, 64.0) * 0.6 + pow(s, 900.0) * 4.0) * (half)uSky[2].w;
-    return half4(c, 1.0);
+    half3 c = (half3)tex2D(uTex, vUv).rgb * (half3)uTint.rgb + (half3)uNight.rgb;
+    return half4(c, (half)1.0);
 }

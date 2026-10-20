@@ -1,11 +1,13 @@
-// A quad over the screen; each corner carries its direction of view.
+// One face of the sky box around the eye.
 
 void main(
-    float2 aPosition,
-    float3 aDirection,
+    float3 aPosition,
+    float2 aUv,
+    uniform float4x4 uVp,
     out float4 oPosition : POSITION,
-    out float3 oDirection : TEXCOORD0)
+    out float2 oUv : TEXCOORD0)
 {
-    oPosition = float4(aPosition, 1.0, 1.0);
-    oDirection = aDirection;
+    float4 p = mul(uVp, float4(aPosition, 1.0));
+    oPosition = p.xyww;
+    oUv = aUv;
 }
