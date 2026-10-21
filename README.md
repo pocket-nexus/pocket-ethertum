@@ -100,6 +100,7 @@ bun tools/vita.ts status | capture --out f.png
 bun tools/vita.ts ctl '{"mode":"play","pos":[14,24,-23],"fly":true}'
 bun tools/vita.ts bench --seconds 60
 bun tools/vita.ts vpk            # standalone package, title PKET00001
+bun tools/vita.ts push-vpk       # the running build copies it to ux0:data/pocket-ethertum/ for VitaShell
 ```
 
 `ctl` keys: `mode` (`title`, `play`, `menu`), `pos`, `yaw`, `pitch`, `fly`,

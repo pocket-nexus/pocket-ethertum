@@ -215,6 +215,35 @@ fn control_watcher() -> mpsc::Receiver<Value> {
     rx
 }
 
+/// `{"fetch": name}`: copies `host0:ether/outbox/<name>` to the data folder on the card on a thread of its own (a
+/// standalone package for VitaShell to install, for one) and answers in `outbox/<name>.done`.
+fn fetch(name: &str) {
+    use std::io::{Read, Write};
+    let (from, to) = (format!("{}/outbox/{name}", paths::HOST), format!("{}/{name}", paths::DATA));
+    let _ = std::thread::Builder::new().name("ether-fetch".into()).stack_size(64 * 1024).spawn(move || {
+        let copied = (|| -> std::io::Result<u64> {
+            std::fs::create_dir_all(paths::DATA)?;
+            let mut src = std::fs::File::open(&from)?;
+            let mut dst = std::fs::File::create(&to)?;
+            let mut buf = vec![0u8; 256 * 1024];
+            let mut bytes = 0u64;
+            loop {
+                let n = src.read(&mut buf)?;
+                if n == 0 {
+                    return Ok(bytes);
+                }
+                dst.write_all(&buf[..n])?;
+                bytes += n as u64;
+            }
+        })();
+        let said = match copied {
+            Ok(bytes) => format!("{bytes} bytes at {to}"),
+            Err(e) => format!("failed: {e}"),
+        };
+        let _ = hostfs::write(&format!("{from}.done"), said.as_bytes());
+    });
+}
+
 /// The sky and the frame's light from the time of day, as the reference lights its world: the sun's light turns
 /// about the world's z axis with the day and its strength is sin² of its height (none at night), while the sky
 /// picture and the light it casts (the reference's environment light, at a fixed intensity) stay as they are all
@@ -540,6 +569,9 @@ fn main() {
 
             // Remote control.
             while let Ok(v) = control.try_recv() {
+                if let Some(name) = v["fetch"].as_str().filter(|n| !n.contains('/') && !n.contains("..")) {
+                    fetch(name);
+                }
                 let f = |a: &Value, i: usize, d: f32| a.get(i).and_then(Value::as_f64).map(|x| x as f32).unwrap_or(d);
                 if v["pos"].is_array() {
                     player.position = Vec3::new(f(&v["pos"], 0, 0.0), f(&v["pos"], 1, 40.0), f(&v["pos"], 2, 0.0));
