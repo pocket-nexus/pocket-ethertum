@@ -8,16 +8,25 @@
 // precision.
 // Light travels to the fragments in a colour, which holds 0..1: it is carried at half and doubled there.
 
+float3 ambient_of(float3 n, float ao, float4 frame[4])
+{
+    return lerp(frame[2].rgb, frame[1].rgb, n.y * 0.5 + 0.5) * ao * 0.5;
+}
+
+// The sun's share of the light, before its colour: N·L by its strength.
+float sun_of(float3 n, float ao, float4 frame[4])
+{
+    return max(dot(n, frame[0].xyz), 0.0) * frame[0].w * ao * 0.5;
+}
+
 float3 light_of(float3 n, float ao, float4 frame[4])
 {
-    float3 amb = lerp(frame[2].rgb, frame[1].rgb, n.y * 0.5 + 0.5);
-    float sun = max(dot(n, frame[0].xyz), 0.0) * frame[0].w;
-    return (amb + frame[3].rgb * sun) * ao * 0.5;
+    return ambient_of(n, ao, frame) + frame[3].rgb * sun_of(n, ao, frame);
 }
 
 // The world fades into the sky over the last quarter of the loaded distance: towards the sky picture's own colour
-// in the direction of the point, read here from a panorama of the sky box (uRing: azimuth across, elevation down,
-// +90° to −90°), so far terrain dissolves into what is drawn behind it while every draw stays opaque.
+// in the direction of the point, read here from an octahedral map of the sky box (uRing, textures.rs), so far
+// terrain dissolves into what is drawn behind it while every draw stays opaque.
 float fog_of(float3 p, float4 frame[4])
 {
     float d = saturate((length(p) * frame[1].w - 0.75) * 4.0);
@@ -26,8 +35,39 @@ float fog_of(float3 p, float4 frame[4])
 
 float3 sky_toward(float3 p, sampler2D ring, float4 frame[4])
 {
-    float3 d = normalize(p);
-    float2 uv = float2(atan2(d.x, -d.z) * 0.15915494 + 0.5, 0.5 - asin(clamp(d.y, -1.0, 1.0)) * 0.31830989);
+    // The octahedral fold needs no unit vector and no angle.
+    float2 q = p.xz / (abs(p.x) + abs(p.y) + abs(p.z));
+    if (p.y < 0.0)
+        q = (1.0 - abs(q.yx)) * float2(q.x >= 0.0 ? 1.0 : -1.0, q.y >= 0.0 ? 1.0 : -1.0);
     float day = frame[3].w;
-    return tex2Dlod(ring, float4(uv, 0.0, 0.0)).rgb * day + float3(0.02, 0.025, 0.05) * (1.0 - day);
+    return tex2Dlod(ring, float4(q * 0.5 + 0.5, 0.0, 0.0)).rgb * day + float3(0.02, 0.025, 0.05) * (1.0 - day);
+}
+
+// The fade's share at p, and in fog the sky's colour behind p by that share. origin.w is 0 for a chunk wholly
+// nearer than where the fade starts (scene.rs): its points skip the sky.
+float fade_of(float3 p, float4 origin, sampler2D ring, float4 frame[4], out float3 fog)
+{
+    fog = float3(0.0, 0.0, 0.0);
+    float f = 0.0;
+    if (origin.w > 0.0) {
+        f = fog_of(p, frame);
+#ifdef REFLECT
+        // The reflection's sky is the sky box turned upside down.
+        fog = sky_toward(float3(p.x, -p.y, p.z), ring, frame) * f;
+#else
+        fog = sky_toward(p, ring, frame) * f;
+#endif
+    }
+    return f;
+}
+
+// The reflection pass (REFLECT) draws each point at its mirror image across the sea's plane, y = 0, as the eye sees
+// it: p is the point from the eye, eye_y the eye's height.
+float3 mirrored(float3 p, float eye_y)
+{
+#ifdef REFLECT
+    return float3(p.x, -p.y - 2.0 * eye_y, p.z);
+#else
+    return p;
+#endif
 }

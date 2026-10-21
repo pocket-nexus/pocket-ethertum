@@ -1,11 +1,31 @@
 uniform sampler2D uTex;
+#ifdef SHADOW
+uniform sampler2D uShadowMap;
+uniform float4 uSun;
+#endif
 
-half4 main(float2 vUv : TEXCOORD0, half4 vFog : TEXCOORD1, half4 vLight : COLOR0) : COLOR
+half4 main(float2 vUv : TEXCOORD0, half4 vFog : TEXCOORD1,
+#ifdef REFLECT
+    float4 vWorld : TEXCOORD2,
+#endif
+#ifdef SHADOW
+    float4 vSun : TEXCOORD2,
+#endif
+    half4 vLight : COLOR0) : COLOR
 {
+#ifdef REFLECT
+    if (vWorld.x < 0.0)
+        discard;
+#endif
     half4 t = (half4)tex2D(uTex, vUv);
     // The reference's cut-out: texels under half alpha are not drawn.
     if (t.a < (half)0.5)
         discard;
-    half3 c = t.rgb * vLight.rgb * (half)2.0 + vFog.rgb;
+#ifdef SHADOW
+    half3 light = vLight.rgb + (half3)uSun.rgb * ((half)vSun.w * sunlit(uShadowMap, vSun, uSun.w));
+#else
+    half3 light = vLight.rgb;
+#endif
+    half3 c = t.rgb * light * (half)2.0 + vFog.rgb;
     return half4(c, (half)1.0);
 }

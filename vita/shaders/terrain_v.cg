@@ -1,38 +1,57 @@
 // The isosurface and placed cubes of one material, textured from three sides (the reference's triplanar
-// mapping): the three projections' coordinates and their weights are computed here, so the fragment program's
-// three reads need nothing computed first.
+// mapping): the three projections' coordinates are computed here, so the fragment program's three reads need
+// nothing computed first; their weights come with the vertex (mesh.rs).
 
 void main(
     float3 aPosition,
     float3 aNormal,
     float aAo,
     float aWeight,
+    float2 aBlend,
     uniform float4x4 uVp,
     uniform float4 uOrigin,
     uniform float4 uUv,
     uniform float4 uFrame[4],
     uniform sampler2D uRing,
+    uniform float4 uMirror,
+#ifdef SHADOW
+    uniform float4 uShadow[4],
+    out float4 oSun : TEXCOORD5,
+#endif
     out float4 oPosition : POSITION,
     out float2 oUvX : TEXCOORD0,
     out float2 oUvY : TEXCOORD1,
     out float2 oUvZ : TEXCOORD2,
     out float4 oFog : TEXCOORD3,
+#ifdef REFLECT
+    out float4 oWorld : TEXCOORD4,
+#endif
     out float4 oBlend : COLOR0,
     out float4 oLight : COLOR1)
 {
     float3 local = aPosition * (1.0 / 256.0);
-    float3 p = local + uOrigin.xyz;
+    float3 p = mirrored(local + uOrigin.xyz, uMirror.x);
     oPosition = mul(uVp, float4(p, 1.0));
+#ifdef REFLECT
+    // Height above the sea: the reflection keeps only what stands above it.
+    oWorld = float4(local.y + uOrigin.y + uMirror.x, 0.0, 0.0, 0.0);
+#endif
     // uUv.xyz: the chunk corner's texture coordinates, wrapped; uUv.w: 1 / the reference's sample scale (1.5).
     float3 t = uUv.xyz + local * uUv.w;
     oUvX = float2(-t.z, -t.y);
     oUvY = float2(t.x, t.z);
     oUvZ = float2(t.x, -t.y);
-    float3 b = pow(abs(aNormal), 4.5);
-    b /= (b.x + b.y + b.z);
-    oBlend = float4(b, aWeight);
+    oBlend = float4(aBlend.x, max(1.0 - aBlend.x - aBlend.y, 0.0), aBlend.y, aWeight);
     // The fragment is texel × light + fog: the light is scaled by what the fog leaves.
-    float f = fog_of(p, uFrame);
+    float3 fog;
+    float f = fade_of(p, uOrigin, uRing, uFrame, fog);
+#ifdef SHADOW
+    // The sky's light here; the sun's goes to the fragments, which take it through the shadow map.
+    oLight = float4(ambient_of(aNormal, aAo, uFrame) * (1.0 - f), 0.0);
+    float4 sh = shadow_of(p, uShadow);
+    oSun = float4(sh.xyz, sun_of(aNormal, aAo, uFrame) * (1.0 - f));
+#else
     oLight = float4(light_of(aNormal, aAo, uFrame) * (1.0 - f), 0.0);
-    oFog = float4(sky_toward(p, uRing, uFrame) * f, 0.0);
+#endif
+    oFog = float4(fog, 0.0);
 }

@@ -10,17 +10,35 @@ void main(
     uniform float4 uOrigin,
     uniform float4 uFrame[4],
     uniform sampler2D uRing,
+    uniform float4 uMirror,
+#ifdef SHADOW
+    uniform float4 uShadow[4],
+    out float4 oSun : TEXCOORD2,
+#endif
     out float4 oPosition : POSITION,
     out float2 oUv : TEXCOORD0,
     out float4 oFog : TEXCOORD1,
+#ifdef REFLECT
+    out float4 oWorld : TEXCOORD2,
+#endif
     out float4 oLight : COLOR0)
 {
     float3 local = aPosition * (1.0 / 256.0);
     local += cos(local.yzx * 1000.0 + uFrame[2].w * 0.8) * 0.16;
-    float3 p = local + uOrigin.xyz;
+    float3 p = mirrored(local + uOrigin.xyz, uMirror.x);
     oPosition = mul(uVp, float4(p, 1.0));
     oUv = aUv;
-    float f = fog_of(p, uFrame);
+#ifdef REFLECT
+    oWorld = float4(local.y + uOrigin.y + uMirror.x, 0.0, 0.0, 0.0);
+#endif
+    float3 fog;
+    float f = fade_of(p, uOrigin, uRing, uFrame, fog);
+#ifdef SHADOW
+    oLight = float4(ambient_of(float3(0.0, 1.0, 0.0), aAo, uFrame) * (1.0 - f), 0.0);
+    float4 sh = shadow_of(p, uShadow);
+    oSun = float4(sh.xyz, sun_of(float3(0.0, 1.0, 0.0), aAo, uFrame) * (1.0 - f));
+#else
     oLight = float4(light_of(float3(0.0, 1.0, 0.0), aAo, uFrame) * (1.0 - f), 0.0);
-    oFog = float4(sky_toward(p, uRing, uFrame) * f, 0.0);
+#endif
+    oFog = float4(fog, 0.0);
 }

@@ -19,8 +19,8 @@ pub struct Textures {
     pub average: Vec<[u8; 4]>,
     /// The sky picture's colour at the horizon: the mean of the middle rows of the four side faces (0..1, sRGB).
     pub horizon: [f32; 3],
-    /// The sky box as a panorama, 128 × 64 (azimuth across, elevation +90° to −90° down): what far terrain fades
-    /// towards, read per vertex in the direction of the vertex.
+    /// The sky box folded into one octahedral map, 128 × 128 ([`octahedral`]): what far terrain fades towards,
+    /// read per vertex in the direction of the vertex.
     pub ring: Texture,
     _vram: Arena,
     pub bytes: usize,
@@ -78,15 +78,15 @@ impl Textures {
                 }
             }
         }
-        let ring_bytes = panorama(&sky_set);
+        let ring_bytes = octahedral(&sky_set);
         let horizon = if n > 0.0 { [(sum[0] / n / 255.0) as f32, (sum[1] / n / 255.0) as f32, (sum[2] / n / 255.0) as f32] } else { [0.6, 0.7, 0.8] };
         let mut sky = Vec::new();
         for i in 0..sky_set.count {
             sky.push(upload(&mut up, &mut vram, &sky_set, i, Wrap::Clamp, false)?);
             up.flush();
         }
-        let mut ring = up.texture(&mut vram, Format::Rgba8, RING_W, RING_H, 1, &ring_bytes)?;
-        ring.set_wrap(Wrap::Repeat, Wrap::Clamp);
+        let mut ring = up.texture(&mut vram, Format::Rgba8, RING, RING, 1, &ring_bytes)?;
+        ring.set_wrap(Wrap::Clamp, Wrap::Clamp);
         ring.set_filter(true, false);
         up.flush();
         let wn = pack.textures(tag::WNRM).map_err(|e| format!("WNRM: {e:?}"))?;
@@ -98,15 +98,16 @@ impl Textures {
     }
 }
 
-const RING_W: u32 = 128;
-const RING_H: u32 = 64;
+const RING: u32 = 128;
 
-/// Resamples the six sky faces (RGBA8, +X −X +Y −Y +Z −Z, in `ether-pack`'s face convention) into an
-/// equirectangular panorama: texel (u, v) looks at azimuth `(u − 0.5)·2π` from −Z towards +X and elevation
-/// `(0.5 − v)·π`. Each texel averages a 3 × 3 spread of the faces' texels.
-fn panorama(sky: &TextureSet) -> Vec<u8> {
-    let (w, h) = (RING_W as usize, RING_H as usize);
-    let mut out = vec![0u8; w * h * 4];
+/// Resamples the six sky faces (RGBA8, +X −X +Y −Y +Z −Z, in `ether-pack`'s face convention) into an octahedral
+/// map with +Y up: a direction d goes to `q = (d.x, d.z) / (|d.x| + |d.y| + |d.z|)`, folded across the diamond's
+/// edges below the horizon (`q ← (1 − |q.yx|)·sign(q)` when d.y < 0), and to the texel at `q / 2 + 1/2`. The
+/// horizon is the diamond's edge and the map is continuous across it, so filtering there needs no seam; the
+/// vertex programs compute q with no angle (`sky_toward` in frame.cg). Each texel averages a 3 × 3 spread.
+fn octahedral(sky: &TextureSet) -> Vec<u8> {
+    let n = RING as usize;
+    let mut out = vec![0u8; n * n * 4];
     if sky.format != PackFormat::Rgba8 || sky.count < 6 {
         return out;
     }
@@ -130,21 +131,28 @@ fn panorama(sky: &TextureSet) -> Vec<u8> {
         let i = (v * sky.width as usize + u) * 4;
         [px[i] as f32, px[i + 1] as f32, px[i + 2] as f32]
     };
-    for j in 0..h {
-        for i in 0..w {
+    // The direction a point of the map stands for, the inverse of the fold.
+    let direction = |u: f32, v: f32| -> [f32; 3] {
+        let (mut x, mut z) = (u * 2.0 - 1.0, v * 2.0 - 1.0);
+        let y = 1.0 - x.abs() - z.abs();
+        if y < 0.0 {
+            (x, z) = ((1.0 - z.abs()) * x.signum(), (1.0 - x.abs()) * z.signum());
+        }
+        [x, y, z]
+    };
+    for j in 0..n {
+        for i in 0..n {
             let mut c = [0f32; 3];
             for dj in -1..=1 {
                 for di in -1..=1 {
-                    let az = ((i as f32 + 0.5 + di as f32 / 3.0) / w as f32 - 0.5) * core::f32::consts::TAU;
-                    let el = (0.5 - (j as f32 + 0.5 + dj as f32 / 3.0) / h as f32) * core::f32::consts::PI;
-                    let d = [az.sin() * el.cos(), el.sin(), -az.cos() * el.cos()];
+                    let d = direction((i as f32 + 0.5 + di as f32 / 3.0) / n as f32, (j as f32 + 0.5 + dj as f32 / 3.0) / n as f32);
                     let s = sample(d);
                     for k in 0..3 {
                         c[k] += s[k] / 9.0;
                     }
                 }
             }
-            let o = (j * w + i) * 4;
+            let o = (j * n + i) * 4;
             out[o] = c[0] as u8;
             out[o + 1] = c[1] as u8;
             out[o + 2] = c[2] as u8;

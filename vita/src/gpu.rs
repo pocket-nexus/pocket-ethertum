@@ -168,6 +168,8 @@ impl Gpu {
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum Cull {
     Back,
+    /// For mirrored geometry, whose winding the mirror turns.
+    Front,
     None,
 }
 
@@ -187,10 +189,10 @@ pub unsafe fn state_blend(ctx: *mut g::SceGxmContext, cull: Cull) {
 /// the projected coordinates before the viewport's flip of y, so that front stays counter-clockwise and the back
 /// to cull is clockwise (seen on the console: culling CCW drew the inside of the sea).
 fn back(cull: Cull) -> u32 {
-    if cull == Cull::Back {
-        g::SceGxmCullMode_SCE_GXM_CULL_CW
-    } else {
-        g::SceGxmCullMode_SCE_GXM_CULL_NONE
+    match cull {
+        Cull::Back => g::SceGxmCullMode_SCE_GXM_CULL_CW,
+        Cull::Front => g::SceGxmCullMode_SCE_GXM_CULL_CCW,
+        Cull::None => g::SceGxmCullMode_SCE_GXM_CULL_NONE,
     }
 }
 

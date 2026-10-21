@@ -113,3 +113,55 @@ fn save_round_trip() {
 fn _done_is_send(d: Done) -> impl Send {
     d
 }
+
+#[test]
+fn caster_meshes_close_across_chunks() {
+    use std::collections::HashMap;
+    let mut w = small();
+    let mut worker = Worker::new();
+    let mut meshes = Vec::new();
+    for _ in 0..10_000 {
+        let jobs = w.plan(IVec3::ZERO, 8, 8);
+        if jobs.is_empty() && w.settled() {
+            break;
+        }
+        for j in jobs {
+            if let Some(m) = w.finish(worker.run(j)) {
+                meshes.push(m);
+            }
+        }
+    }
+    assert_eq!(meshes.len(), 27);
+    // Directed edges of every caster triangle, in 1/256 voxel of the world.
+    let mut edges: HashMap<([i32; 3], [i32; 3]), i32> = HashMap::new();
+    let (mut casters, mut terrain) = (0, 0);
+    for (at, m) in &meshes {
+        terrain += m.terrain.batches.iter().map(|b| b.opaque.1 / 3).sum::<u32>();
+        casters += m.caster.indices.len() / 3;
+        let world = |i: u16| {
+            let p = m.caster.vertices[i as usize].pos;
+            [p[0] as i32 + at.x * 16 * 256, p[1] as i32 + at.y * 16 * 256, p[2] as i32 + at.z * 16 * 256]
+        };
+        for t in m.caster.indices.chunks_exact(3) {
+            let (a, b, c) = (world(t[0]), world(t[1]), world(t[2]));
+            for (p, q) in [(a, b), (b, c), (c, a)] {
+                *edges.entry((p, q)).or_default() += 1;
+            }
+        }
+        for v in &m.terrain.vertices {
+            assert!(v.blend[0] as u32 + v.blend[1] as u32 <= 256, "{v:?}");
+        }
+    }
+    assert!(casters > 0 && (casters as u32) * 2 < terrain, "{casters} caster triangles for {terrain}");
+    // Away from the edge of the meshed block (chunks -1..=1: voxels -16..32), the surface is closed: each edge is
+    // walked once each way, so no seam opens between chunks.
+    let inside = |p: [i32; 3]| p.iter().all(|&c| c > -12 * 256 && c < 28 * 256);
+    let mut checked = 0;
+    for (&(p, q), &n) in &edges {
+        if inside(p) && inside(q) {
+            assert_eq!(edges.get(&(q, p)).copied().unwrap_or(0), n, "edge {p:?} → {q:?}");
+            checked += 1;
+        }
+    }
+    assert!(checked > 100, "{checked} edges checked");
+}

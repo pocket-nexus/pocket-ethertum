@@ -1,0 +1,10 @@
+// One triangle over the whole target; uv runs down the image from its top row.
+
+void main(
+    float2 aPosition,
+    out float4 oPosition : POSITION,
+    out float2 oUv : TEXCOORD0)
+{
+    oPosition = float4(aPosition, 0.5, 1.0);
+    oUv = float2(aPosition.x * 0.5 + 0.5, 0.5 - aPosition.y * 0.5);
+}

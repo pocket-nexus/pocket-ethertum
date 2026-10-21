@@ -5,8 +5,9 @@
 //!
 //! `cargo run --release -- run [--out DIR]`: the reference game itself (its client and integrated server, as its
 //! `world_smoke` example drives them), at its default load distance (4, 3), rendering at 960 × 544 into an
-//! image (no window, no vsync). The player is put at (8, 32, 8) flying with pitch −0.4, the world is given 30 s
-//! to load, then 20 s of frame times are recorded and a picture is saved. Prints JSON.
+//! image (no window, no vsync). The player is put at `--x --y --z` (default (8, 32, 8)) flying with `--pitch`
+//! (−0.4) and `--yaw` (0), the world is given 30 s to load, then 20 s of frame times are recorded and a picture is
+//! saved. Prints JSON.
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -29,8 +30,10 @@ fn main() -> AppExit {
             AppExit::Success
         }
         _ => {
-            let out = args.iter().position(|a| a == "--out").and_then(|i| args.get(i + 1)).cloned().unwrap_or_else(|| ".".into());
-            run(out)
+            let arg = |k: &str| args.iter().position(|a| a == k).and_then(|i| args.get(i + 1)).cloned();
+            let out = arg("--out").unwrap_or_else(|| ".".into());
+            let n = |k: &str, d: f32| arg(k).and_then(|v| v.parse().ok()).unwrap_or(d);
+            run(out, Vec3::new(n("--x", 8.0), n("--y", 32.0), n("--z", 8.0)), n("--pitch", -0.4), n("--yaw", 0.0))
         }
     }
 }
@@ -154,9 +157,12 @@ struct Bench {
     frames: Vec<f32>,
     shot: bool,
     out: String,
+    pos: Vec3,
+    pitch: f32,
+    yaw: f32,
 }
 
-fn run(out: String) -> AppExit {
+fn run(out: String, pos: Vec3, pitch: f32, yaw: f32) -> AppExit {
     let runtime_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("target/run").join(std::process::id().to_string());
     std::fs::create_dir_all(&runtime_dir).expect("runtime directory");
     std::env::set_current_dir(&runtime_dir).expect("runtime directory");
@@ -169,7 +175,7 @@ fn run(out: String) -> AppExit {
     .add_plugins(ClientGamePlugin)
     .insert_resource(bevy::audio::GlobalVolume::new(bevy::audio::Volume::Linear(0.0)))
     .insert_resource(WinitSettings::game())
-    .insert_resource(Bench { out, ..default() })
+    .insert_resource(Bench { out, pos, pitch, yaw, ..default() })
     .add_systems(PostStartup, setup)
     .add_systems(Last, step);
     app.run()
@@ -211,7 +217,7 @@ fn step(
     if now < bench.next_at {
         if bench.phase >= 2 {
             if let Ok((mut tr, mut pos, mut vel, _)) = players.single_mut() {
-                pos.0 = Vec3::new(8.0, 32.0, 8.0);
+                pos.0 = bench.pos;
                 tr.translation = pos.0;
                 vel.0 = Vec3::ZERO;
             }
@@ -227,11 +233,11 @@ fn step(
         1 => {
             if let Ok((mut tr, mut pos, mut vel, mut ctl)) = players.single_mut() {
                 net.as_mut().expect("connected").send_packet(&CPacket::LoadDistance { load_distance: IVec2::new(4, 3) });
-                pos.0 = Vec3::new(8.0, 32.0, 8.0);
+                pos.0 = bench.pos;
                 tr.translation = pos.0;
                 ctl.is_flying = true;
-                ctl.pitch = -0.4;
-                ctl.yaw = 0.0;
+                ctl.pitch = bench.pitch;
+                ctl.yaw = bench.yaw;
                 vel.0 = Vec3::ZERO;
                 bench.phase = 2;
                 bench.next_at = now + 30.0;
@@ -244,7 +250,7 @@ fn step(
         }
         3 => {
             bench.phase = 4;
-            let path = std::path::Path::new(&bench.out).join("reference-8-32-8.png");
+            let path = std::path::Path::new(&bench.out).join(format!("reference-{}-{}-{}.png", bench.pos.x, bench.pos.y, bench.pos.z));
             commands.spawn(Screenshot::image(bench.image.clone())).observe(move |event: On<ScreenshotCaptured>, mut bench: ResMut<Bench>| {
                 event.image.clone().try_into_dynamic().expect("readable").to_rgb8().save(&path).expect("save picture");
                 bench.shot = true;
@@ -263,7 +269,7 @@ fn step(
                 "{}",
                 serde_json::json!({
                     "seconds": 20, "frames": f.len(), "meanMs": mean, "p50Ms": pct(0.5), "p99Ms": pct(0.99), "worstMs": pct(1.0),
-                    "fps": 1000.0 / mean, "residentTriangles": tris, "loadDistance": [4, 3], "raster": [960, 544],
+                    "fps": 1000.0 / mean, "residentTriangles": tris, "loadDistance": [4, 3], "raster": [960, 544], "pose": [bench.pos.x, bench.pos.y, bench.pos.z, bench.pitch, bench.yaw],
                 })
             );
             client.exit_world();

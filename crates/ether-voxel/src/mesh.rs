@@ -12,7 +12,8 @@
 //!   these streams with the reference's own `meshgen`.
 //! - **The device mesh.** [`build`] turns the streams into indexed meshes with
 //!   16-bit positions and per-vertex occlusion, the terrain split into batches
-//!   by material (see [`TerrainMesh`]).
+//!   by material (see [`TerrainMesh`]), and a coarse copy of the terrain for
+//!   the sun's shadow map (see [`casters`]).
 //!
 //! Every function reads a [`Pad`]: the chunk and a two-voxel border copied from
 //! its neighbours, so meshing runs on any thread without touching the world.
@@ -384,8 +385,9 @@ fn put_grass(pos: Vec3, tex_id: u8, emit: &mut impl FnMut(RefVertex, u32)) {
 /// Fixed-point position: 1/256 voxel.
 pub const POS_SCALE: f32 = 256.0;
 
-/// A terrain vertex: position (1/256 voxel, from the chunk's corner), normal, ambient occlusion, and the weight
-/// of its batch's material at this vertex (255 where the vertex is of that material, else 0). 12 bytes.
+/// A terrain vertex: position (1/256 voxel, from the chunk's corner), normal, ambient occlusion, the weight of
+/// its batch's material at this vertex (255 where the vertex is of that material, else 0), and the triplanar
+/// mapping's shares of the x and z projections (the y projection takes the rest). 14 bytes.
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct TerrainVertex {
@@ -393,7 +395,8 @@ pub struct TerrainVertex {
     pub normal: [i8; 3],
     pub ao: u8,
     pub weight: u8,
-    pub _pad: [u8; 2],
+    pub blend: [u8; 2],
+    pub _pad: u8,
 }
 
 /// A foliage vertex: position, coordinates in the device's foliage atlas (1/65535 of it), occlusion. 12 bytes.
@@ -413,6 +416,14 @@ pub struct LiquidVertex {
     pub pos: [i16; 3],
     pub normal: [i8; 3],
     pub _pad: [u8; 3],
+}
+
+/// A vertex of the sun's casters: position only. 8 bytes.
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct CasterVertex {
+    pub pos: [i16; 3],
+    pub _pad: i16,
 }
 
 /// The triangles of one material in a chunk's terrain. `opaque` are the triangles whose first material this is,
@@ -448,6 +459,8 @@ pub struct ChunkMesh {
     pub terrain: TerrainMesh,
     pub foliage: Indexed<FoliageVertex>,
     pub liquid: Indexed<LiquidVertex>,
+    /// The terrain as the sun's map takes it: surface nets over cells of two voxels ([`casters`]).
+    pub caster: Indexed<CasterVertex>,
     /// The terrain's triangles in chunk coordinates, as the reference's collider takes them: every triangle of
     /// the stream, including those a renderer leaves out.
     pub collision: Vec<[Vec3; 3]>,
@@ -455,7 +468,7 @@ pub struct ChunkMesh {
 
 impl ChunkMesh {
     pub fn is_empty(&self) -> bool {
-        self.terrain.indices.is_empty() && self.foliage.indices.is_empty() && self.liquid.indices.is_empty() && self.collision.is_empty()
+        self.terrain.indices.is_empty() && self.foliage.indices.is_empty() && self.liquid.indices.is_empty() && self.caster.indices.is_empty() && self.collision.is_empty()
     }
 
     pub fn triangles(&self) -> usize {
@@ -473,6 +486,80 @@ fn fixed(p: Vec3) -> [i16; 3] {
 fn snorm(n: Vec3) -> [i8; 3] {
     let f = |v: f32| libm::roundf(v.clamp(-1.0, 1.0) * 127.0) as i8;
     [f(n.x), f(n.y), f(n.z)]
+}
+
+/// The reference's triplanar weights, `|n|^4.5` over their sum: the x and z projections' shares, of 255.
+fn blend(n: Vec3) -> [u8; 2] {
+    let p = |v: f32| libm::powf(v.abs(), 4.5);
+    let (x, y, z) = (p(n.x), p(n.y), p(n.z));
+    let sum = x + y + z;
+    let f = |v: f32| libm::roundf(v / sum * 255.0) as u8;
+    [f(x), f(z)]
+}
+
+/// Lattice points of the caster mesh along one axis: `-1..=8`, two voxels apart.
+const COARSE: i32 = LEN / 2 + 2;
+
+/// The terrain as the sun's map takes it: surface nets over cells of two voxels, a quarter of the terrain's
+/// triangles. A lattice point holds the most solid of the 2 × 2 × 2 voxels from it, opaque cubes counted solid,
+/// so the surface lies up to a voxel outside the terrain's and a column one voxel wide (a trunk) still casts. The
+/// lattice is aligned across chunks (16 is even) and a cell's point depends on its eight lattice points alone,
+/// so neighbouring chunks meet without gaps.
+pub fn casters(pad: &Pad, out: &mut Indexed<CasterVertex>) {
+    let at = |p: IVec3| ((p.x + 1) * COARSE * COARSE + (p.y + 1) * COARSE + (p.z + 1)) as usize;
+    let mut value = [0f32; (COARSE * COARSE * COARSE) as usize];
+    for x in -1..COARSE - 1 {
+        for y in -1..COARSE - 1 {
+            for z in -1..COARSE - 1 {
+                let p = ivec3(x, y, z);
+                value[at(p)] = VERT.iter().map(|d| pad.at(p * 2 + *d)).map(|v| if v.is_opaque_cube() { 1.0 } else { v.isovalue() }).fold(f32::NEG_INFINITY, f32::max);
+            }
+        }
+    }
+    // Cells -1..=7 on each axis; a cell's vertex index, once made.
+    const CELLS2: i32 = COARSE - 1;
+    let mut index = [u16::MAX; (CELLS2 * CELLS2 * CELLS2) as usize];
+    let mut vertex = |c: IVec3, out: &mut Indexed<CasterVertex>| -> u16 {
+        let k = ((c.x + 1) * CELLS2 * CELLS2 + (c.y + 1) * CELLS2 + (c.z + 1)) as usize;
+        if index[k] == u16::MAX {
+            let mut sum = Vec3::ZERO;
+            let mut n = 0;
+            for edge in EDGE {
+                let (v0, v1) = (VERT[edge[0]], VERT[edge[1]]);
+                let (a, b) = (value[at(c + v0)], value[at(c + v1)]);
+                if sign_changed(a, b) {
+                    if let Some(t) = inverse_lerp(a, b, 0.0) {
+                        sum += t * (v1 - v0).as_vec3() + v0.as_vec3();
+                        n += 1;
+                    }
+                }
+            }
+            let fp = if n == 0 { Vec3::splat(0.5) } else { sum / n as f32 };
+            // A lattice point stands for the two voxels from it: its centre is one voxel on.
+            index[k] = out.vertices.len() as u16;
+            out.vertices.push(CasterVertex { pos: fixed((c.as_vec3() + fp) * 2.0 + 1.0), _pad: 0 });
+        }
+        index[k]
+    };
+    for y in 0..LEN / 2 {
+        for z in 0..LEN / 2 {
+            for x in 0..LEN / 2 {
+                let p = ivec3(x, y, z);
+                let c0 = value[at(p)];
+                for axis in 0..3 {
+                    let c1 = value[at(p + AXES[axis])];
+                    if !sign_changed(c0, c1) {
+                        continue;
+                    }
+                    let flip = c0 <= 0.0;
+                    for corner in 0..6 {
+                        let i = vertex(p + ADJACENT[axis][if flip { 5 - corner } else { corner }], out);
+                        out.indices.push(i);
+                    }
+                }
+            }
+        }
+    }
 }
 
 /// Columns and rows of 128² tiles in the device's foliage atlas (`ether-pack`'s `FOLI`: 1024 × 512, tile `t` at
@@ -638,7 +725,7 @@ impl Builder {
                     let verts = &mut out.terrain.vertices;
                     let at = self.keys.get_or(*key as u64, || {
                         let i = (verts.len() as u32 - base) as u16;
-                        verts.push(TerrainVertex { pos: fixed(v.pos), normal: snorm(v.norm), ao: occlusion(pad, v.pos), weight: if v.uv.x as u8 == m { 255 } else { 0 }, _pad: [0; 2] });
+                        verts.push(TerrainVertex { pos: fixed(v.pos), normal: snorm(v.norm), ao: occlusion(pad, v.pos), weight: if v.uv.x as u8 == m { 255 } else { 0 }, blend: blend(v.norm), _pad: 0 });
                         i
                     });
                     target.push(at);
@@ -650,6 +737,7 @@ impl Builder {
             out.terrain.indices.extend_from_slice(&layer);
             out.terrain.batches.push(batch);
         }
+        casters(pad, &mut out.caster);
 
         // Foliage: cards share their four corners. A leaf voxel with leaves or solid ground on all six sides is
         // inside a crown, and its cards are left out. Cards are stored in the order of a hash of their voxel, so

@@ -1,0 +1,25 @@
+// The sun's distance map, one rectangle of it at a time. uVp takes a point from the eye to the rectangle's clip
+// space (its x and y across the sun's rays, its z along them); uDepth gives the point's distance from the map's
+// top plane over its depth range, 0..1. CUT: leaf cards, which carry the foliage atlas's coordinates.
+
+void main(
+    float3 aPosition,
+#ifdef CUT
+    float2 aUv,
+#endif
+    uniform float4x4 uVp,
+    uniform float4 uOrigin,
+    uniform float4 uDepth,
+    out float4 oPosition : POSITION,
+#ifdef CUT
+    out float2 oUv : TEXCOORD1,
+#endif
+    out float4 oDepth : TEXCOORD0)
+{
+    float3 p = aPosition * (1.0 / 256.0) + uOrigin.xyz;
+    oPosition = mul(uVp, float4(p, 1.0));
+    oDepth = float4(dot(p, uDepth.xyz) + uDepth.w, 0.0, 0.0, 0.0);
+#ifdef CUT
+    oUv = aUv;
+#endif
+}

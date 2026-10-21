@@ -22,7 +22,9 @@ mod hostfs;
 mod interface;
 mod mods;
 mod paths;
+mod post;
 mod scene;
+mod shadow;
 mod textures;
 
 use std::sync::mpsc;
@@ -341,7 +343,8 @@ fn main() {
     unsafe {
         let live = cfg!(feature = "usb-debug");
         // Development builds take start switches from the USB share: {"title": false, "msaa": 0 | 2 | 4,
-        // "play": true (skip the title), "fresh": true (ignore the save)}.
+        // "play": true (skip the title), "fresh": true (ignore the save), "shadows": true (start with the sun's
+        // map; off by default, `ctl` turns it on and off)}.
         let boot: Value = if live { hostfs::read(&format!("{}/boot.json", paths::HOST), 4096).and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or(Value::Null) } else { Value::Null };
         let samples = boot["msaa"].as_u64().unwrap_or(4);
         if !(live && boot["title"] == Value::Bool(false)) {
@@ -415,6 +418,22 @@ fn main() {
             Ok(s) => s,
             Err(e) => fail(&mut ui, &mut dev, e),
         };
+        let target_msaa = match samples {
+            4 => pocket_vita_gxm::target::Msaa::X4,
+            2 => pocket_vita_gxm::target::Msaa::X2,
+            _ => pocket_vita_gxm::target::Msaa::None,
+        };
+        // {"profile": true}: the scene goes to a target of its own, timed by its own notice.
+        let profile = live && boot["profile"] == Value::Bool(true);
+        let mut post = match post::Post::new(&mut gpu, target_msaa, profile) {
+            Ok(p) => p,
+            Err(e) => fail(&mut ui, &mut dev, e),
+        };
+        let mut shadow = match shadow::Shadow::new(&mut gpu) {
+            Ok(s) => s,
+            Err(e) => fail(&mut ui, &mut dev, e),
+        };
+        shadow.timed = profile;
         gpu.finish();
         let programs_ms = t_programs.elapsed().as_millis() as u64;
 
@@ -482,6 +501,11 @@ fn main() {
         // ------------------------------------------------------------------------------------------ the frame loop
         let ctx = g::vita2d_get_context();
         let mut fence = Fence::new(0, 2);
+        let mut scene_fence = Fence::new(2, 2);
+        let mut water_look = [0.03f32, 0.05, 0.09, 0.35, 0.06];
+        let mut shadows_on = boot["shadows"].as_bool().unwrap_or(false);
+        let mut shadow_ms = 0f32;
+        let (mut gpu_ms, mut reflection_ms, mut reflect_tris) = (0f32, 0f32, 0u32);
         let mut timing = Timing { ms: [16.7; Timing::N], at: 0, late: 0, frames: 0 };
         let mut last = Instant::now();
         let mut last_vcount = sceDisplayGetVcount();
@@ -501,6 +525,9 @@ fn main() {
         let mut edits = 0u32;
         let mut reloads = 0u32;
         let mut show = [true; 3];
+        // Leaves in the sea's reflection: off, the title's view over the sea misses 60 with them (`ctl`
+        // {"reflect": {"foliage": true}} draws them).
+        let mut mirror_foliage = false;
         let mut held_frames = 0u32;
         let mut rescues = 0u32;
         let mut safe = player.position;
@@ -539,6 +566,25 @@ fn main() {
                     // (each pass on its own; turning one off leaves the others)
                     if let Some(on) = v["show"][k].as_bool() {
                         show[i] = on;
+                    }
+                }
+                if let Some(on) = v["reflect"]["foliage"].as_bool() {
+                    mirror_foliage = on;
+                }
+                if let Some(on) = v["shadows"].as_bool() {
+                    shadows_on = on;
+                }
+                for (i, k) in ["terrain", "foliage"].iter().enumerate() {
+                    if let Some(on) = v["casters"][k].as_bool() {
+                        shadow.casters[i] = on;
+                    }
+                }
+                if let Some(c) = v["casters"]["cull"].as_u64() {
+                    shadow.cull = c as u8;
+                }
+                if let Some(a) = v["water"].as_array() {
+                    for (i, x) in a.iter().enumerate().take(5) {
+                        water_look[i] = x.as_f64().unwrap_or(water_look[i] as f64) as f32;
                     }
                 }
                 if v["save"] == Value::Bool(true) {
@@ -768,7 +814,7 @@ fn main() {
                 1.05, 0.98, 0.88, sk.tint[0],
             ];
             let proj = camera.projection_gl(960.0 / 544.0, 0.1, 1000.0);
-            let v = scene::View { eye: camera.eye, vp: proj * camera.view_rotation(), frame, fog: sk.horizon, sky_zenith: sk.zenith, sky_horizon: sk.horizon, sky_tint: sk.tint, sky_night: sk.night, sun_dir: sk.sun_dir, sun: sk.sun, reach, terrain: show[0], water: show[1], foliage: show[2], plain: false };
+            let v = scene::View { eye: camera.eye, vp: proj * camera.view_rotation(), frame, fog: sk.horizon, sky_zenith: sk.zenith, sky_horizon: sk.horizon, sky_tint: sk.tint, sky_night: sk.night, sun_dir: sk.sun_dir, sun: sk.sun, reach, terrain: show[0], water: show[1], foliage: show[2], mirror_foliage, plain: false, water_look, shadow: None, shadow_map: &shadow.texture, sun_colour: [1.05, 0.98, 0.88] };
 
             let t2 = Instant::now();
             let slot = (frame_no % 2) as usize;
@@ -777,12 +823,40 @@ fn main() {
             wait_ms = wait_ms * 0.9 + waited * 0.1;
             // Frame `frame_no - 2` used this slot: the GPU is done with it and with every mesh it drew.
             scene.heap.collect(frame_no.saturating_sub(2));
+            // The sea's reflection, then the scene; with the profile switch the scene goes to its own target and
+            // is timed by its notice, then copied to the display.
+            let ts = Instant::now();
+            let mut v = v;
+            v.shadow = if shadows_on { shadow.update(ctx, &scene, v.eye, v.sun_dir, v.sun) } else { None };
+            shadow_ms = shadow_ms * 0.9 + ts.elapsed().as_secs_f32() * 100.0;
+            let tr = Instant::now();
+            if v.water {
+                if post.reflection.begin(ctx, 1.0).is_ok() {
+                    reflect_tris = scene.draw_reflection(ctx, &v).tris;
+                    post.reflection.end(ctx, None);
+                }
+            }
+            reflection_ms = reflection_ms * 0.9 + tr.elapsed().as_secs_f32() * 100.0;
+            let reflection = post.reflection.texture;
+            if let Some(target) = post.profile.as_mut() {
+                let tg = Instant::now();
+                if target.begin(ctx, 1.0).is_ok() {
+                    stats = scene.draw(ctx, &v, frame_no, &reflection);
+                    target.end(ctx, Some(scene_fence.signal(slot)));
+                    scene_fence.wait(slot);
+                    gpu_ms = gpu_ms * 0.9 + tg.elapsed().as_secs_f32() * 100.0;
+                }
+            }
             g::vita2d_pool_reset();
             if slot == 1 {
                 g::vita2d_pool_malloc(POOL_BYTES / 2);
             }
             g::vita2d_start_drawing_advanced(core::ptr::null_mut(), 0);
-            stats = scene.draw(ctx, &v, frame_no);
+            if let Some(target) = post.profile.as_ref() {
+                post.copy(ctx, &target.texture);
+            } else {
+                stats = scene.draw(ctx, &v, frame_no, &reflection);
+            }
             g::sceGxmSetViewport(ctx, 480.0, 480.0, 272.0, -272.0, 0.5, 0.5);
             gpu::state_overlay(ctx);
             ui.draw();
@@ -817,6 +891,7 @@ fn main() {
                     "stage": "running",
                     "mode": session.mode.name(),
                     "frameMs": timing.avg(), "worstMs": timing.worst(), "late": timing.late, "frames": timing.frames,
+                    "gpuMs": if profile { json!({"sceneWithReflection": gpu_ms}) } else { Value::Null }, "reflection": {"cpuMs": reflection_ms, "tris": reflect_tris}, "shadow": {"on": shadows_on, "cpuMs": shadow_ms, "gpuMs": shadow.gpu_ms, "rects": shadow.rects, "draws": shadow.draws, "tris": shadow.tris, "fullRedraws": shadow.full}, "waterLook": water_look,
                     "cpuMs": {"work": work_ms, "gpuWait": wait_ms, "draw": draw_ms, "world": world_ms, "sim": sim_ms, "interface": ui_ms},
                     "workerMs": {"generate": gen_ms, "mesh": mesh_ms},
                     "scene": {"byPass": {"terrain": stats.by_pass[0], "layers": stats.by_pass[1], "water": stats.by_pass[2], "foliage": stats.by_pass[3]}, "chunks": stats.chunks, "culled": stats.culled, "draws": stats.draws, "tris": stats.tris, "resident": scene.len(), "heapBytes": scene.bytes(), "heapPeak": scene.heap.peak, "heapLargest": scene.heap.largest(), "uploadsFailed": uploads_failed, "textureBytes": scene.textures.bytes},

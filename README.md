@@ -53,11 +53,20 @@ where materials meet.
 
 **The renderer** (GXM, 960 × 544, 4× multisampling) draws per chunk: terrain
 one draw per material with that material's texture, mapped from three sides as
-the reference's triplanar shader does (the three projections' coordinates are
-computed per vertex, so the fragment program's three reads need nothing
-computed first); the layers; the water, opaque and mirror-like with three
-octaves of ripples; the foliage cards with the reference's cut-out at half
-alpha. Back faces are clockwise on GXM after the viewport's flip of y.
+the reference's triplanar shader does (the three projections' coordinates and
+weights are computed per vertex, so the fragment program's three reads need
+nothing computed first); the layers; the water, opaque, showing the terrain
+mirrored in the sea's plane (drawn each frame at half the display's size) moved
+by three octaves of ripples, and the sun's highlight; the foliage cards with
+the reference's cut-out at half alpha. Back faces are clockwise on GXM after the
+viewport's flip of y. Far terrain fades towards the sky picture folded into one
+128 × 128 octahedral map, read per vertex with no angle computed; a chunk wholly
+inside the fade's start skips the read.
+
+The sun's shadow (`vita/src/shadow.rs`: a 1024² distance map around the
+player, refreshed an eighth a frame from two-voxel caster meshes and the leaf
+cards) is built in and off: it has not been measured on the console since its
+caster meshes replaced the terrain's. `ctl '{"shadows":true}'` turns it on.
 
 **Mods** set the world's parameters, the materials, the items, the hotbar and
 the player's tuning, hear breaks, places and ticks, answer commands, and queue
@@ -95,7 +104,11 @@ bun tools/vita.ts vpk            # standalone package, title PKET00001
 
 `ctl` keys: `mode` (`title`, `play`, `menu`), `pos`, `yaw`, `pitch`, `fly`,
 `daytime`, `walk: [x, y, seconds]` (stick input), `stroke` (`break`, `place`),
-`show: {terrain, water, foliage}`, `save`. `ETHER_MODS=glow bun tools/vita.ts
+`show: {terrain, water, foliage}`, `reflect: {foliage}` (leaves in the sea's
+reflection), `shadows`, `water: [r, g, b, share, ripple]`, `save`. `boot`
+switches, read at start: `title`, `msaa`, `play`, `fresh`, `shadows`,
+`profile` (the scene drawn to a target of its own and timed: `gpuMs` in the
+status). `ETHER_MODS=glow bun tools/vita.ts
 sync` adds an example mod to the share.
 
 Measured on the development console (clocks 444/222/222/166 MHz,
@@ -106,6 +119,11 @@ typical view, 4.5–7.5 ms of frame-thread work. A chunk takes about 11 ms to
 generate and 8 ms to mesh on a worker; loading the first 567 meshed chunks
 takes 13.6 s. Looking straight down at the sea from 30 m was the heaviest view
 measured: 17 ms.
+
+With the sea's reflection (2026-10-21): the title's view over the sea, 60 s,
+3 590 frames, 0 late; the same 60 s flight, 3 590 frames, 1 late, about 100 k
+triangles and 460 draws. Leaves drawn in the reflection as well cost the title's
+view 59 late frames in 30 s; they are off.
 
 ## Where this differs from the reference
 
@@ -118,7 +136,8 @@ measured: 17 ms.
 | Leaves | every card | cards of a leaf voxel enclosed by leaves or ground left out | inside a crown |
 | Foliage | every card at every distance | all within 24 m, thinning to a quarter at the edge | fill rate |
 | The world's edge | fog of 1 200 m visibility over 64 m of loaded world: a visible edge | the last quarter of the radius fades towards the sky picture behind it | |
-| Lighting | PBR, deferred, sun + sky environment light, screen-space reflections, bloom | per-vertex sun and sky light with occlusion; water's mirror from an analytic sky | the GPU |
+| Lighting | PBR, deferred, sun + sky environment light, sun shadows, screen-space reflections, bloom | per-vertex sun and sky light with occlusion; no shadows | the GPU |
+| Water's reflection | screen-space: what is on the screen | the terrain mirrored in the sea's plane and the sky picture; leaves left out | the GPU (see the measurements) |
 | The sky at night | the same picture, sun off | the same | |
 | Hotbar | empty at start, the brush set in a panel | brush presets and two items from the base mod | the Vita has no mouse for the panel |
 | Controls | keyboard, mouse, gamepad, touch stick | the Vita's pad (see Controls in the interface) | |

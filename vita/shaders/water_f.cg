@@ -1,6 +1,8 @@
 uniform sampler2D uNormals;
-// [0] rgb: the water's own colour; [1] unused; [2] rgb: the sky overhead; [3] rgb: the sky at the horizon, w: the
-// sun's strength; [4] xyz: towards the sun
+uniform sampler2D uReflect;
+// [0] rgb: the water's own colour, w: the reflection's share looking straight down; [1] unused; [2] rgb: the sky
+// overhead; [3] rgb: the sky at the horizon, w: the sun's strength; [4] xyz: towards the sun, w: how far the
+// ripples move the reflection
 uniform float4 uLook[5];
 
 half2 octave(float2 uv)
@@ -9,7 +11,7 @@ half2 octave(float2 uv)
     return (half2)tex2D(uNormals, uv).rg * (half)2.0 - (half)1.0;
 }
 
-half4 main(float2 vN0 : TEXCOORD0, float2 vN1 : TEXCOORD1, float2 vN2 : TEXCOORD2, half4 vFog : TEXCOORD3, half4 vView : COLOR1, half4 vLight : COLOR0) : COLOR
+half4 main(float2 vN0 : TEXCOORD0, float2 vN1 : TEXCOORD1, float2 vN2 : TEXCOORD2, half4 vFog : TEXCOORD3, float4 vScreen : TEXCOORD4, half4 vView : COLOR1, half4 vLight : COLOR0) : COLOR
 {
     // The octaves' strengths are the reference's (0.16, 0.18, 0.093); a side face keeps its flat normal. The
     // normal stays (x, 1, z) unnormalized: its ripples are small.
@@ -20,10 +22,14 @@ half4 main(float2 vN0 : TEXCOORD0, float2 vN1 : TEXCOORD1, float2 vN2 : TEXCOORD
     half nv = saturate(dot(n, v));
     half k = (half)1.0 - nv;
     half k2 = k * k;
-    half fresnel = ((half)0.02 + (half)0.98 * k2 * k2 * k) * top;
-    // The reflection: r = 2 (n·v) n − v.
+    // The reference's water is a mirror (black base colour, roughness 0): what it shows is what it reflects. Its
+    // reflection is lit far brighter than the sky picture's own range, which the share looking down stands in for.
+    half fresnel = ((half)uLook[0].w + ((half)1.0 - (half)uLook[0].w) * k2 * k2 * k) * top;
+    // The scene mirrored in the sea, read where this point is on the screen, moved by the ripples.
+    float2 at = vScreen.xy / vScreen.w + (float2)xz * uLook[4].w;
+    half3 reflected = (half3)tex2D(uReflect, at).rgb;
+    // The sun's highlight: the reflection r = 2 (n·v) n − v against the sun, to the 192nd power.
     half3 r = (half)2.0 * nv * n - v;
-    half3 sky = lerp((half3)uLook[3].rgb, (half3)uLook[2].rgb, saturate(r.y));
     half s = saturate(dot(r, (half3)uLook[4].xyz));
     half s2 = s * s;
     half s4 = s2 * s2;
@@ -31,6 +37,6 @@ half4 main(float2 vN0 : TEXCOORD0, float2 vN1 : TEXCOORD1, float2 vN2 : TEXCOORD
     half s16 = s8 * s8;
     half s32 = s16 * s16;
     half spec = s32 * s32 * s32 * (half)uLook[3].w * (half)4.0;
-    half3 c = lerp((half3)uLook[0].rgb * vLight.rgb * (half)2.0, sky, fresnel) + spec;
+    half3 c = lerp((half3)uLook[0].rgb * vLight.rgb * (half)2.0, reflected, fresnel) + spec;
     return half4(c * ((half)1.0 - vLight.a) + vFog.rgb, (half)1.0);
 }
