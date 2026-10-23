@@ -74,6 +74,9 @@ texture array). One bind group serves every draw of a pipeline.
 - **The leaf cards are drawn at every distance**, as the reference draws them, and no governor thins them (the
   PS Vita draws a quarter of them at the edge of the loaded world and fewer where the GPU misses refreshes).
 - **Four samples a pixel** (the PS Vita: two), and the terrain's pictures are filtered with anisotropy 8.
+- **The cards' light goes through the display's curve per pixel**, with the texel's own colour. The PS Vita folds
+  the curve into each corner for the atlas's mean texel, which the leaves set: the grass's tile is far brighter,
+  and the fold takes it to white in full sun.
 - **The world is not saved.** The interface's settings are, in the browser's `localStorage` under
   `pocket-ethertum.interface`.
 - **The mods** are the base mod's registry (above).

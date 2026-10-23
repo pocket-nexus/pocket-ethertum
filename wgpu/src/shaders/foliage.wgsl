@@ -2,6 +2,10 @@
 // vertex sways as the reference's foliage program moves it: by the cosine of its own position (×1000) and the
 // time, 0.16 voxel at most. The reference lights the cards as faces that look up. A draw's instance is its
 // chunk's row of the table.
+//
+// The light goes through the display's curve per pixel, with the texel's own colour, where the PS Vita folds the
+// curve into each corner for the atlas's mean texel: the grass's tile is far brighter than that mean, and the fold
+// takes its texels in full sun to white.
 
 @group(1) @binding(0) var atlas: texture_2d<f32>;
 @group(1) @binding(1) var smooth_: sampler;
@@ -17,8 +21,8 @@ struct CardIn {
 struct CardOut {
     @builtin(position) clip: vec4<f32>,
     @location(0) uv: vec2<f32>,
-    // the light through the curve, at a third, scaled by what the fade leaves
-    @location(1) light: vec3<f32>,
+    // the light on the card (rgb) and what the fade leaves of it (a)
+    @location(1) light: vec4<f32>,
     @location(2) fog: vec3<f32>,
     @location(3) height: f32,
 };
@@ -42,9 +46,7 @@ fn foliage_vs(v: CardIn, @builtin(instance_index) slot: u32) -> CardOut {
     if (frame.flags.y > 0.5 && frame.flags.x < 0.5) {
         sun *= sunlit_vertex(from_eye + v.centre.xyz * 1.5);
     }
-    let e = frame.zenith.rgb * v.ao.x + sun;
-    // The curve for the foliage atlas's mean texel (t² of 0.116, 0.115, 0.084).
-    out.light = curve_of(e, vec3<f32>(0.116, 0.115, 0.084)) * ((1.0 - fade.share) * (1.0 / 3.0));
+    out.light = vec4<f32>(frame.zenith.rgb * v.ao.x + sun, 1.0 - fade.share);
     return out;
 }
 
@@ -55,5 +57,5 @@ fn foliage_fs(i: CardOut) -> @location(0) vec4<f32> {
     if (t.a < 0.5 || (frame.flags.x > 0.5 && i.height < 0.0)) {
         discard;
     }
-    return vec4<f32>(t.rgb * i.light * 3.0 + i.fog, 1.0);
+    return vec4<f32>(display(t.rgb * t.rgb * i.light.rgb) * i.light.a + i.fog, 1.0);
 }
