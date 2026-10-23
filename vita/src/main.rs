@@ -261,9 +261,6 @@ fn sky(clock: &WorldClock, reg: &Registry) -> Sky {
     Sky { sun_dir: clock.sun_dir().normalize(), sun: clock.sun_strength(), tint: [1.0; 3], night: [0.0; 3] }
 }
 
-/// The sun's light on a face that faces it at full strength, in the units of the sky's light (`SkyLight`): the
-/// reference's 20 klux (`skylight_illuminance`) through its camera's exposure, over π (a diffuse face).
-const SUN_LIGHT: f32 = 20_000.0 * 0.0010019 / core::f32::consts::PI;
 
 /// What the interface shows of the registry: materials, items and the hotbar.
 fn publish_registry(reg: &Registry) {
@@ -874,7 +871,7 @@ fn main() {
             let reach = (world.radius.h as f32 + 0.5) * 16.0;
             #[rustfmt::skip]
             let frame: [f32; 16] = [
-                sk.sun_dir.x, sk.sun_dir.y, sk.sun_dir.z, sk.sun * SUN_LIGHT,
+                sk.sun_dir.x, sk.sun_dir.y, sk.sun_dir.z, sk.sun * ether_look::SUN_LIGHT,
                 lt.zenith[0], lt.zenith[1], lt.zenith[2], 1.0 / reach,
                 lt.nadir[0], lt.nadir[1], lt.nadir[2], clock.time_inhabited,
                 lt.horizon[0], lt.horizon[1], lt.horizon[2], sk.tint[0],

@@ -1,8 +1,8 @@
 # Pocket Ethertum
 
 [Ethertum](https://github.com/Dreamtowards/Ethertum) (Dreamtowards, GPL-3.0),
-a voxel sandbox of smooth isosurface terrain built on Bevy, on the PS Vita,
-on an engine of its own built on Pocket3D's mechanisms. The world is the
+a voxel sandbox of smooth isosurface terrain built on Bevy, on the PS Vita and
+in a browser tab, on an engine of its own built on Pocket3D's mechanisms. The world is the
 reference's world: the same noise, the same terrain, the same trees and grass,
 the same surface nets, **byte for byte**, checked against the reference's own
 source.
@@ -19,8 +19,10 @@ source.
 | `crates/ether-pack`, `crates/ether-cook` | The cooked pack (terrain materials BC1, foliage atlas BC3, sky faces, water normals, item icons) and its cooker. |
 | `crates/ether-mod`, `mods/` | Mods in a QuickJS realm of their own; the base game is written as one (`mods/base/main.js`). `docs/MODDING.md`. |
 | `crates/ether-interface`, `ui/` | The PocketJS interface over the scene (title, HUD, hotbar, menus, settings) and `Session`, the flow. |
+| `crates/ether-look` | How the world looks on every device: the reference's light and tone curve, and what is derived from the sky picture. |
 | `vita/` | The PS Vita runtime: GXM renderer, worker threads, the interface and the mod realm embedded. |
-| `tools/` | `cook.ts`, `ui.ts`, `vita.ts` (Bun). |
+| `wgpu/` | The browser's: a wgpu renderer of the PS Vita's pack over WebGPU, in PocketJS's Pocket3D player (`wgpu/README.md`). |
+| `tools/` | `cook.ts`, `ui.ts`, `vita.ts`, `web.ts` (Bun). |
 | `vendor/pocketjs` | PocketJS, pinned: device toolchains, the Vita dev host and wire, VPK packaging, the GXM kernel, the title card, the icon. |
 
 ## The engine
@@ -98,6 +100,8 @@ decides what is redone (regenerate, remesh, retune).
 ```sh
 cargo test --workspace --release        # parity with the reference, world, player, pack, mods, interface
 bun tools/ui.ts test                     # the interface's flow against a mock renderer
+bun test tools/web.test.ts               # the browser page plays as every device that has a package
+bun tools/web.ts check                   # the browser page in Chrome, from the title into play
 ```
 
 `ether-oracle` compares, by the bits of every value: noise at 30 000 points
@@ -106,6 +110,17 @@ in one order on both sides; the terrain, foliage and water vertex streams of 27
 chunks. The reference's chunk writes go through `&T` cast to `&mut T`, which an
 optimizing build may drop (a tree then grows no leaves; seen with the oracle at
 opt-level 3), so the oracle compiles the reference without optimization.
+
+## In a browser
+
+`bun tools/web.ts serve` serves the game at http://127.0.0.1:8803/, drawn by the
+wgpu renderer in `wgpu/` over WebGPU, in PocketJS's Pocket3D player: the PS
+Vita's shell with its keys as the controls (W A S D the left stick, I J K L the
+right, Z X C V the face buttons, Q E the shoulders, Space START). It reads the
+PS Vita's pack and runs the PS Vita's world, player and interface; the mods are
+the base mod's registry, taken as JSON (a tab runs no QuickJS of the game's).
+`wgpu/README.md` has its frame, what differs from the PS Vita's picture, and
+what it measured.
 
 ## On the console
 

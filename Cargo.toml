@@ -5,6 +5,7 @@ members = [
     "crates/ether-world",
     "crates/ether-sim",
     "crates/ether-pack",
+    "crates/ether-look",
     "crates/ether-cook",
     "crates/ether-mod",
     "crates/ether-interface",

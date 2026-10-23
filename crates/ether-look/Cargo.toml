@@ -1,0 +1,10 @@
+[package]
+name = "ether-look"
+version = "0.1.0"
+edition = "2021"
+license = "GPL-3.0-only"
+publish = false
+description = "How the world looks on every device: the reference's light and tone map, and what is derived from the sky picture"
+
+[dependencies]
+ether-pack = { path = "../ether-pack" }

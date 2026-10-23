@@ -1,6 +1,7 @@
 # Build output
 /target/
 /vita/target/
+/wgpu/target/
 /dist/
 node_modules/
 

@@ -11,14 +11,21 @@
 //! | [`registry`] | What the mods define, as the engine reads it; [`Registry::diff`] and [`Changes`] |
 //! | [`Mods`] | Loading and reloading, `break` / `place` / `tick` events, commands, the edits they queue |
 //!
+//! Without the `script` feature the crate is [`registry`] alone, for a host that
+//! runs no script and reads a registry another machine wrote
+//! (`examples/registry.rs` writes the base mod's).
+//!
 //! The engine keeps the per-voxel work native: generation, population and
 //! meshing read the registry's parameters, never a script. Scripts run at
 //! events and a few times a second. `docs/MODDING.md` describes the API and
 //! what each kind of change makes the engine redo.
 
+#[cfg(feature = "script")]
 mod mods;
+#[cfg(feature = "script")]
 pub mod qjs;
 pub mod registry;
 
+#[cfg(feature = "script")]
 pub use mods::{base, discover, Action, BlockEvent, Config, During, Edit, LogLine, ModError, Mods, NoWorld, Outcome, PlayerState, Source, WorldView, BASE};
 pub use registry::{Brush, Changes, Clock, Controller, Decor, Foliage, Item, Material, MaterialKind, Registry, Sky, Slot, Worldgen};

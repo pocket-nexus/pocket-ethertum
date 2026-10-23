@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#171226">
+<title>Pocket Ethertum</title>
+<link rel="icon" href="icon.png">
+<!-- The devices the page plays as, as Pocket Studio names a package's target. `pocket-studio site` and
+     `pocket-studio package` read it: a device with a package is a device here (tools/web.test.ts). -->
+<meta name="pocket-devices" content="vita">
+<!-- The PS Vita's pack: its file, on a server that answers byte ranges, or the manifest of the pack cut into
+     pieces and the pack's name after `#` (tools/web.ts writes it for what it serves). -->
+<meta name="pocket-pack" content="ether.pack">
+<!-- The page is the Pocket3D player of PocketJS's browser kernel, which builds everything in the body:
+     these two files are its layout and its look. -->
+<link rel="stylesheet" href="pocket3d-stage.css">
+<link rel="stylesheet" href="pocket3d-player.css">
+<style>
+  /* The ground of the Pocket3D title card, before any script has run. */
+  html, body { height: 100%; margin: 0; background: #171226; }
+</style>
+</head>
+<body>
+<script type="module" src="main.js"></script>
+</body>
+</html>

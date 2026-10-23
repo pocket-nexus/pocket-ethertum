@@ -18,6 +18,7 @@ ether-voxel = { path = "../crates/ether-voxel" }
 ether-world = { path = "../crates/ether-world" }
 ether-sim = { path = "../crates/ether-sim" }
 ether-pack = { path = "../crates/ether-pack" }
+ether-look = { path = "../crates/ether-look" }
 ether-mod = { path = "../crates/ether-mod" }
 # The interface (ui/): its protocol, the flow, and the channel the PocketJS guest opens in the process.
 ether-interface = { path = "../crates/ether-interface", features = ["guest"] }

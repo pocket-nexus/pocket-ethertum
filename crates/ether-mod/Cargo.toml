@@ -6,10 +6,16 @@ license = "GPL-3.0-only"
 publish = false
 description = "Mods in QuickJS: the registry of materials, items and world parameters, event hooks, hot reload"
 
+[features]
+default = ["script"]
+# The mods themselves, run in QuickJS. Without it the crate is the registry alone: what a host that runs no
+# script (the browser's build, which takes the base mod's registry as JSON) reads.
+script = ["dep:libquickjs-sys"]
+
 [dependencies]
 ether-voxel = { path = "../ether-voxel" }
 # The QuickJS build Pocket Tokyo's Vita runtime links; it cross-compiles with the Vita toolchain's
 # environment (`TARGET_CC=arm-vita-eabi-gcc`, …) and keeps the 16-byte JSValue on the Vita.
-libquickjs-sys = { git = "https://github.com/pocket-nexus/quickjs-rs.git", rev = "ba5bdd0dc013518768e76cd9e05cd30ed53dd35b" }
+libquickjs-sys = { git = "https://github.com/pocket-nexus/quickjs-rs.git", rev = "ba5bdd0dc013518768e76cd9e05cd30ed53dd35b", optional = true }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

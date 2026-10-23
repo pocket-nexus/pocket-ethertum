@@ -7,5 +7,8 @@
     "setup": "git submodule update --init && bun install --cwd vendor/pocketjs",
     "ui": "bun tools/ui.ts",
     "test:ui": "bun tools/ui.ts test"
+  },
+  "devDependencies": {
+    "playwright-core": "1.63.0"
   }
 }

@@ -1,0 +1,60 @@
+# Pocket Ethertum drawn with wgpu: in a browser tab over WebGPU (wasm32), and on the machine that builds it
+# (Metal), where frames go to files.
+#
+# The world is crates/ether-world, the player crates/ether-sim and the flow crates/ether-interface, as the
+# PS Vita links them; the base mod's registry arrives as JSON (crates/ether-mod's `registry` example), since a
+# tab runs no QuickJS of the game's. The pack is the PS Vita's (`bun tools/cook.ts`), read as it is.
+# Everything that is not this game's is PocketJS's browser kernel
+# (vendor/pocketjs/devices/web/pocket-web-wgpu): the GPU device and its screens, the interface's overlay
+# pass, the page and its player.
+#
+#   bun tools/web.ts build | serve | dist | shot | check     (from the repository root)
+
+[package]
+name = "ether-wgpu"
+version = "0.1.0"
+edition = "2021"
+license = "GPL-3.0-only"
+publish = false
+description = "Pocket Ethertum's wgpu renderer: the PS Vita's pack and world in a browser tab and on the build machine"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[[bin]]
+name = "ether-shot"
+path = "src/bin/shot.rs"
+
+[dependencies]
+ether-voxel = { path = "../crates/ether-voxel" }
+ether-world = { path = "../crates/ether-world" }
+ether-sim = { path = "../crates/ether-sim" }
+ether-interface = { path = "../crates/ether-interface" }
+ether-mod = { path = "../crates/ether-mod", default-features = false }
+ether-pack = { path = "../crates/ether-pack" }
+ether-look = { path = "../crates/ether-look" }
+pocket-web-wgpu = { path = "../vendor/pocketjs/devices/web/pocket-web-wgpu" }
+serde_json = "1"
+bytemuck = "1"
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+# The command line tool that writes the JavaScript side must be this version (tools/web.ts checks).
+wasm-bindgen = "=0.2.126"
+wasm-bindgen-futures = "0.4"
+js-sys = "0.3"
+web-sys = { version = "0.3", features = ["HtmlCanvasElement", "console"] }
+
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+png = "0.17"
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+panic = "abort"
+
+[profile.dev]
+opt-level = 1
+
+[workspace]
+resolver = "2"

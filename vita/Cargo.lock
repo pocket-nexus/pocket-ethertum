@@ -35,6 +35,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "ether-look"
+version = "0.1.0"
+dependencies = [
+ "ether-pack",
+]
+
+[[package]]
 name = "ether-mod"
 version = "0.1.0"
 dependencies = [
@@ -125,6 +132,7 @@ name = "pocket-ethertum-vita"
 version = "0.1.0"
 dependencies = [
  "ether-interface",
+ "ether-look",
  "ether-mod",
  "ether-pack",
  "ether-sim",
