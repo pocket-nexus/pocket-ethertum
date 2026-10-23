@@ -122,6 +122,26 @@ the base mod's registry, taken as JSON (a tab runs no QuickJS of the game's).
 `wgpu/README.md` has its frame, what differs from the PS Vita's picture, and
 what it measured.
 
+## On Pocket Studio
+
+The game is on Pocket Studio as `ethertum` (app `ax810htm7vc4q`,
+`.pocket-studio.json`): the browser build plays at
+https://ethertum.studio.pocket.nexus, and its page,
+https://studio.pocket.nexus/games/ethertum, offers the PS Vita's `.vpk`. A
+release deploys the site before the package, as the Studio asks:
+
+```sh
+bun tools/web.ts dist                    # → .pocket-build/web/dist
+pocket-studio site .pocket-build/web/dist
+pocket-studio package pocket-ethertum-<version>-vita.vpk --target vita --version <version>
+bun tools/listing.ts --upload            # the page: listing/listing.json's words, its clips and pictures, the cover
+```
+
+`tools/listing.ts` films the clips from the browser build in Chrome with the
+interface off, one held frame after another along each entry's `take`; the
+pictures marked `vita` are captures from the console
+(`bun tools/vita.ts capture`), and the media stay out of Git (`dist/listing/`).
+
 ## On the console
 
 The development loop runs in Pocket Devkit (`vendor/pocketjs/apps/devkit`) over

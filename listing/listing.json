@@ -1,0 +1,85 @@
+{
+  "tagline": "Ethertum's voxel sandbox: dig, build and fly over floating islands, on the PS Vita and in a browser.",
+  "description": [
+    "Pocket Ethertum is Ethertum, Dreamtowards' open-source voxel sandbox of smooth terrain, on an engine of its own. The world is the original's world: the same islands, caves, trees and grass, generated and meshed on the device and checked bit for bit against the original's own source.",
+    "You start in the air over the sea. Fly between the floating islands, land on them, dig into the hills and build with the brush: a sphere or a cube of any of the original's materials, as large as you set it. The day turns, and the sun's shadows fall through the tree crowns onto the ground.",
+    "The light follows the original's: each face takes the sky picture's light from where it faces, the sun's light where the sun reaches it, and one curve that stands for the original's tone map. The sea is a mirror of the islands and the sky, blue where the original's fog lies on it.",
+    "On a PS Vita it draws 960 × 544 at 60 frames a second with a GXM renderer of its own: the sun's shadows, the sea's reflection and the leaf cards in two samples a pixel. In a browser it draws the same pack with a WebGPU renderer of its own, in a PS Vita's shell whose keys are the controls. A mod of your own runs on the PS Vita, where the game's mods run in QuickJS.",
+    "The source is GPL-3.0, as the original's is: github.com/pocket-nexus/pocket-ethertum. The sky picture is from Poly Haven (CC0)."
+  ],
+  "translations": {
+    "ja": {
+      "tagline": "Ethertum のボクセル・サンドボックス。浮かぶ島々を掘って、建てて、飛ぶ。PS Vita とブラウザで。",
+      "description": [
+        "Pocket Ethertum は、Dreamtowards のオープンソースのボクセル・サンドボックス Ethertum を、独自のエンジンに移植したものです。世界は原作の世界そのままです。同じ島、洞窟、木と草を端末の上で生成してメッシュにし、原作のソースコードとビット単位で照合しています。",
+        "海の上空から始まります。浮かぶ島々のあいだを飛び、島に降り、丘を掘り、ブラシで建てられます。ブラシは原作のどの素材でも使える球か立方体で、大きさは自由に変えられます。一日が過ぎていき、太陽の影が木々の葉を抜けて地面に落ちます。",
+        "光は原作に合わせています。面はそれぞれ向いている方向の空の光を受け、太陽が届くところでは太陽の光も受けて、原作のトーンマップに代わる一本の曲線を通ります。海は島と空を映す鏡で、原作の霧がかかるところでは青くなります。",
+        "PS Vita では独自の GXM レンダラーで 960 × 544、毎秒 60 フレームで描きます。太陽の影、海の映り込み、葉のカードを 1 ピクセルあたり 2 サンプルで描きます。ブラウザでは同じパックを独自の WebGPU レンダラーで描き、PS Vita の筐体の中で、そのキーで操作します。自作の MOD は、MOD を QuickJS で動かす PS Vita で動きます。",
+        "ソースは原作と同じく GPL-3.0 です: github.com/pocket-nexus/pocket-ethertum。空の写真は Poly Haven（CC0）のものです。"
+      ],
+      "captions": {
+        "islands.mp4": "スポーンの島から海を見渡す。島が海に映る。",
+        "forest.mp4": "木々に覆われた島を上から。",
+        "dig.mp4": "木々のあいだの空き地をブラシで掘り、穴を埋めて鋼の小山を盛る。",
+        "afternoon.mp4": "午後の海と雲。太陽が傾いていく。",
+        "vita-sea.jpg": "PS Vita の実機で撮った画面: スポーンの島と海。",
+        "vita-trees.jpg": "PS Vita の実機で撮った画面: 浮かぶ島々と木々。",
+        "vita-valley.jpg": "PS Vita の実機で撮った画面: 谷の上を飛ぶ。"
+      }
+    }
+  },
+  "media": [
+    {
+      "kind": "video",
+      "file": "islands.mp4",
+      "poster": "islands.jpg",
+      "take": { "seconds": 12, "pos": [13.8, 28, -23.3], "pitch": [-0.15, -0.15], "yaw": [1.5, 3.1], "daytime": [0.3, 0.3] },
+      "caption": "From the spawn island across the sea, where the islands are mirrored."
+    },
+    {
+      "kind": "video",
+      "file": "forest.mp4",
+      "poster": "forest.jpg",
+      "take": { "seconds": 10, "pos": [150, 45, -150], "pitch": [-0.95, -0.7], "yaw": [-1.2, -0.3], "daytime": [0.33, 0.34] },
+      "caption": "A forested island from above."
+    },
+    {
+      "kind": "video",
+      "file": "dig.mp4",
+      "poster": "dig.jpg",
+      "take": { "seconds": 12, "pos": [18.5, 39.5, 30.5], "pitch": [-1.0, -1.0], "yaw": [2.4, 2.4], "daytime": [0.32, 0.32], "strokes": [[1, 4, "break", 0.75], [5.5, 9, "place", 0.75]] },
+      "caption": "Digging a hole into a clearing with the brush, then filling it and raising a mound of steel."
+    },
+    {
+      "kind": "video",
+      "file": "afternoon.mp4",
+      "poster": "afternoon.jpg",
+      "take": { "seconds": 10, "pos": [13.8, 36, -23.3], "pitch": [-0.1, -0.1], "yaw": [-1.1, -0.5], "daytime": [0.42, 0.46] },
+      "caption": "The sea and its clouds in the afternoon, as the sun goes down."
+    },
+    {
+      "kind": "image",
+      "file": "vita-sea.jpg",
+      "still": ".pocket-build/validation/quality/final5/sea.png",
+      "from": "vita",
+      "caption": "Captured on a PS Vita: the spawn island and the sea."
+    },
+    {
+      "kind": "image",
+      "file": "vita-trees.jpg",
+      "still": ".pocket-build/validation/quality/final5/trees.png",
+      "from": "vita",
+      "caption": "Captured on a PS Vita: floating islands and their trees."
+    },
+    {
+      "kind": "image",
+      "file": "vita-valley.jpg",
+      "still": ".pocket-build/validation/quality/final5/extra.png",
+      "from": "vita",
+      "caption": "Captured on a PS Vita: flying over a valley."
+    }
+  ],
+  "card": "card.jpg",
+  "cardTake": { "pos": [150, 45, -150], "pitch": -0.85, "yaw": -0.8, "daytime": 0.33 },
+  "cover": ".pocket-build/validation/quality/final5/sea.png"
+}

@@ -592,6 +592,7 @@ impl App {
         let mut status = json!({
             "target": "web",
             "stage": if self.entered() { "running" } else if self.trouble.is_empty() { "loading" } else { "error" },
+            "settled": self.world_settled(),
             "mode": self.session.mode.name(),
             "frames": self.frames, "frameMs": average, "worstMs": worst, "late": self.late, "cpuMs": self.cpu_ms, "worldMs": self.world_ms,
             "loadMs": self.loaded_ms,
