@@ -7,7 +7,7 @@
 //! `world_smoke` example drives them), at its default load distance (4, 3), rendering at 960 × 544 into an
 //! image (no window, no vsync). The player is put at `--x --y --z` (default (8, 32, 8)) flying with `--pitch`
 //! (−0.4) and `--yaw` (0), the world is given 30 s to load, then 20 s of frame times are recorded and a picture is
-//! saved. Prints JSON.
+//! saved. `--daytime` holds the time of day there (else it runs from the reference's 0.15). Prints JSON.
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -33,7 +33,8 @@ fn main() -> AppExit {
             let arg = |k: &str| args.iter().position(|a| a == k).and_then(|i| args.get(i + 1)).cloned();
             let out = arg("--out").unwrap_or_else(|| ".".into());
             let n = |k: &str, d: f32| arg(k).and_then(|v| v.parse().ok()).unwrap_or(d);
-            run(out, Vec3::new(n("--x", 8.0), n("--y", 32.0), n("--z", 8.0)), n("--pitch", -0.4), n("--yaw", 0.0))
+            let daytime = arg("--daytime").and_then(|v| v.parse().ok());
+            run(out, Vec3::new(n("--x", 8.0), n("--y", 32.0), n("--z", 8.0)), n("--pitch", -0.4), n("--yaw", 0.0), daytime)
         }
     }
 }
@@ -160,9 +161,10 @@ struct Bench {
     pos: Vec3,
     pitch: f32,
     yaw: f32,
+    daytime: Option<f32>,
 }
 
-fn run(out: String, pos: Vec3, pitch: f32, yaw: f32) -> AppExit {
+fn run(out: String, pos: Vec3, pitch: f32, yaw: f32, daytime: Option<f32>) -> AppExit {
     let runtime_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("target/run").join(std::process::id().to_string());
     std::fs::create_dir_all(&runtime_dir).expect("runtime directory");
     std::env::set_current_dir(&runtime_dir).expect("runtime directory");
@@ -175,7 +177,7 @@ fn run(out: String, pos: Vec3, pitch: f32, yaw: f32) -> AppExit {
     .add_plugins(ClientGamePlugin)
     .insert_resource(bevy::audio::GlobalVolume::new(bevy::audio::Volume::Linear(0.0)))
     .insert_resource(WinitSettings::game())
-    .insert_resource(Bench { out, pos, pitch, yaw, ..default() })
+    .insert_resource(Bench { out, pos, pitch, yaw, daytime, ..default() })
     .add_systems(PostStartup, setup)
     .add_systems(Last, step);
     app.run()
@@ -204,8 +206,12 @@ fn step(
     mut players: Query<(&mut Transform, &mut Position, &mut LinearVelocity, &mut CharacterController)>,
     meshes: Res<Assets<Mesh>>,
     mut exit: MessageWriter<AppExit>,
+    world: Option<ResMut<WorldInfo>>,
 ) {
     let now = time.elapsed_secs_f64();
+    if let (Some(d), Some(mut world)) = (bench.daytime, world) {
+        world.daytime = d;
+    }
     if bench.phase == 3 {
         bench.frames.push(time.delta_secs() * 1000.0);
     }

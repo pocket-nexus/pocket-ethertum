@@ -26,10 +26,15 @@ use crate::scene::Scene;
 pub const N: i64 = 1024;
 pub const SIZE: f64 = 96.0;
 /// Bands the map is redrawn in, one a frame.
-pub const BANDS: i64 = 8;
+pub const BANDS: i64 = 16;
 /// Metres of distance along the sun's rays the map covers.
 const DEPTH: f64 = 512.0;
 const TILE: i64 = 32;
+/// Metres a leaf card's corner may lie behind the nearest caster and still be lit: its own card and the cards
+/// crossing it in the same voxel cast within that.
+pub const FOLIAGE_BIAS: f32 = 0.25;
+/// The alpha under which a leaf card's texel casts no shadow: the reference's cut-out.
+pub const LEAF_CUT: f32 = 0.5;
 
 /// What the receivers are given this frame.
 #[derive(Clone, Copy)]
@@ -45,6 +50,7 @@ struct Caster {
     vp: Param,
     origin: Param,
     depth: Param,
+    cut: Param,
     unit: Option<u32>,
 }
 
@@ -83,6 +89,13 @@ pub struct Shadow {
     pub casters: [bool; 2],
     /// Face culling of the terrain casters: 0 none, 1 back, 2 front (for measurements).
     pub cull: u8,
+    /// Metres a leaf card's corner may lie behind the nearest caster and be lit ([`FOLIAGE_BIAS`]).
+    pub leaf_bias: f32,
+    /// The alpha under which a leaf card's texel casts no shadow ([`LEAF_CUT`]).
+    pub leaf_cut: f32,
+    /// The share of the leaf cards that cast (a prefix of their hashed order), times the share the display draws
+    /// ([`Scene::density`], which the governor lowers where the leaves cost more than a refresh).
+    pub leaf_share: f32,
 }
 
 /// Light space for a sun: two axes across its rays and the direction towards it.
@@ -162,7 +175,7 @@ impl Shadow {
         let clear = gpu.program("shadow_clear", "", include_str!("../shaders/post_v.cg"), "float4 main() : COLOR { return float4(1.0, 1.0, 1.0, 1.0); }\n", &Stream { stride: 8, attrs: &[("aPosition", 0, f32_, 2)] }, none, &[Blend::Opaque])?;
         let caster = |p: Program| {
             let unit = p.fs.sampler_index("uTex");
-            Caster { vp: p.vparam("uVp"), origin: p.vparam("uOrigin"), depth: p.vparam("uDepth"), unit, program: p }
+            Caster { vp: p.vparam("uVp"), origin: p.vparam("uOrigin"), depth: p.vparam("uDepth"), cut: p.fparam("uCut"), unit, program: p }
         };
         let mut block = Block::with_access(Kind::Main, 4096, false)?;
         let vb = block.alloc(24, 16).ok_or("shadow triangle")?.cast::<f32>();
@@ -197,6 +210,9 @@ impl Shadow {
             gpu_ms: 0.0,
             casters: [true, true],
             cull: 2,
+            leaf_share: 1.0,
+            leaf_bias: FOLIAGE_BIAS,
+            leaf_cut: LEAF_CUT,
         })
     }
 
@@ -265,7 +281,7 @@ impl Shadow {
             u.x as f32, u.y as f32, u.z as f32, fu as f32,
             v.x as f32, v.y as f32, v.z as f32, fv as f32,
             ld.x as f32, ld.y as f32, ld.z as f32, ((self.top - el) / DEPTH) as f32,
-            wu as f32, wv as f32, 1.0, 0.0,
+            wu as f32, wv as f32, 1.0, (self.leaf_bias as f64 / DEPTH) as f32,
         ];
         Some(ShadowView { rows, bias: (0.08 / DEPTH) as f32 })
     }
@@ -310,7 +326,7 @@ impl Shadow {
         let terrain = &self.terrain;
         terrain.program.bind(ctx, 0);
         let eye = Vec3::new(0.0, 0.0, 0.0) + scene_eye;
-        let (d, t) = if !casters[0] { (0, 0) } else { scene.draw_casters(ctx, eye, axes, (lo, hi), false, &mut |ctx, origin| {
+        let (d, t) = if !casters[0] { (0, 0) } else { scene.draw_casters(ctx, eye, axes, (lo, hi), None, &mut |ctx, origin| {
             let un = Uniforms::vertex(ctx);
             un.set(terrain.vp, &vp);
             un.set(terrain.origin, &[origin.x, origin.y, origin.z, 0.0]);
@@ -320,15 +336,17 @@ impl Shadow {
         self.tris += t;
         gpu::state_opaque(ctx, Cull::None);
         let cut = &self.cut;
+        let leaf_cut = self.leaf_cut;
         cut.program.bind(ctx, 0);
         if let Some(unit) = cut.unit {
             g::sceGxmSetFragmentTexture(ctx, unit, &scene.textures.foliage.gxm);
         }
-        let (d, t) = if !casters[1] { (0, 0) } else { scene.draw_casters(ctx, eye, axes, (lo, hi), true, &mut |ctx, origin| {
+        let (d, t) = if !casters[1] { (0, 0) } else { scene.draw_casters(ctx, eye, axes, (lo, hi), Some(self.leaf_share * scene.density), &mut |ctx, origin| {
             let un = Uniforms::vertex(ctx);
             un.set(cut.vp, &vp);
             un.set(cut.origin, &[origin.x, origin.y, origin.z, 0.0]);
             un.set(cut.depth, &depth);
+            Uniforms::fragment(ctx).set(cut.cut, &[leaf_cut, 0.0, 0.0, 0.0]);
         }) };
         self.draws += d;
         self.tris += t;

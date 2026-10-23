@@ -8,6 +8,25 @@ use ether_pack::{tag, Format as PackFormat, Pack, TextureSet};
 use pocket_vita_gxm::mem::{Arena, Kind};
 use pocket_vita_gxm::texture::{Format, Texture, Uploader, Wrap};
 
+/// The display's tone curve: the reference's tone map (TonyMcMapface) and sRGB encoding, fitted as one curve. A
+/// texel t (sRGB, taken as t² in linear light) under light E shows as `sqrt(x / (x + DISPLAY_K))` with x = t²·E
+/// (`display` in frame.cg). Against Bevy's own lookup table, over texels 0.08..0.85 and lights 0.15..6, the fit
+/// is off by 0.012 RMS and 0.025 at most.
+pub const DISPLAY_K: f32 = 0.8;
+/// The reference's camera exposure, 2^−9.7 / 1.2 (Bevy's default, EV100 9.7), times the brightness of its sky
+/// box and of its environment light, 1000: the factor from a sky texel to its light.
+pub const SKY_EXPOSED: f32 = 1.0019;
+
+/// The sky picture's light on a face, in linear light after the exposure: the reference lights every face with
+/// its sky box read in the face's normal (an environment light of the raw picture). Means over the cap within
+/// 26° of straight up, the band within 9° of the horizon and the cap around straight down.
+#[derive(Clone, Copy)]
+pub struct SkyLight {
+    pub zenith: [f32; 3],
+    pub horizon: [f32; 3],
+    pub nadir: [f32; 3],
+}
+
 pub struct Textures {
     /// Terrain materials; texture `m - 1` is material `m`.
     pub terrain: Vec<Texture>,
@@ -17,8 +36,9 @@ pub struct Textures {
     pub water: Texture,
     /// Average colour of each terrain material (sRGB), for anything that wants one colour of it.
     pub average: Vec<[u8; 4]>,
-    /// The sky picture's colour at the horizon: the mean of the middle rows of the four side faces (0..1, sRGB).
+    /// The sky picture's colour at the horizon as shown: the mean of the middle rows of the four side faces (0..1).
     pub horizon: [f32; 3],
+    pub light: SkyLight,
     /// The sky box folded into one octahedral map, 128 × 128 ([`octahedral`]): what far terrain fades towards,
     /// read per vertex in the direction of the vertex.
     pub ring: Texture,
@@ -60,29 +80,53 @@ impl Textures {
         let foliage = upload(&mut up, &mut vram, &foli, 0, Wrap::Clamp, true)?;
         up.flush();
         let sky_set = pack.textures(tag::SKY).map_err(|e| format!("SKY_: {e:?}"))?;
+        if sky_set.format != PackFormat::Rgba8 || sky_set.count < 6 {
+            return Err("SKY_: six RGBA faces expected".into());
+        }
+        let size = sky_set.width as usize;
+        let light = sky_light(&sky_set);
+        // The faces as the display shows them: through the tone curve, as the reference shows its sky box.
+        let curve: Vec<u8> = (0..256)
+            .map(|b| {
+                let t = b as f32 / 255.0;
+                let x = t * t * SKY_EXPOSED;
+                ((x / (x + DISPLAY_K)).sqrt() * 255.0 + 0.5) as u8
+            })
+            .collect();
+        let faces: Vec<Vec<u8>> = (0..6)
+            .map(|f| {
+                let mut px = sky_set.texture(f).to_vec();
+                for (i, b) in px.iter_mut().enumerate() {
+                    if i % 4 != 3 {
+                        *b = curve[*b as usize];
+                    }
+                }
+                px
+            })
+            .collect();
         // Rows a little above the middle of +X, −X, +Z and −Z (the band where far terrain meets the sky).
         let mut sum = [0f64; 3];
         let mut n = 0f64;
-        if sky_set.format == PackFormat::Rgba8 {
-            for face in [0u32, 1, 4, 5] {
-                let px = sky_set.texture(face);
-                let w = sky_set.width as usize;
-                for row in (sky_set.height as usize * 7 / 16)..(sky_set.height as usize / 2) {
-                    for x in 0..w {
-                        let i = (row * w + x) * 4;
-                        for c in 0..3 {
-                            sum[c] += px[i + c] as f64;
-                        }
-                        n += 1.0;
+        for face in [0, 1, 4, 5] {
+            let px = &faces[face];
+            for row in (size * 7 / 16)..(size / 2) {
+                for x in 0..size {
+                    let i = (row * size + x) * 4;
+                    for c in 0..3 {
+                        sum[c] += px[i + c] as f64;
                     }
+                    n += 1.0;
                 }
             }
         }
-        let ring_bytes = octahedral(&sky_set);
-        let horizon = if n > 0.0 { [(sum[0] / n / 255.0) as f32, (sum[1] / n / 255.0) as f32, (sum[2] / n / 255.0) as f32] } else { [0.6, 0.7, 0.8] };
+        let horizon = [(sum[0] / n / 255.0) as f32, (sum[1] / n / 255.0) as f32, (sum[2] / n / 255.0) as f32];
+        let ring_bytes = octahedral(&faces, size);
         let mut sky = Vec::new();
-        for i in 0..sky_set.count {
-            sky.push(upload(&mut up, &mut vram, &sky_set, i, Wrap::Clamp, false)?);
+        for face in &faces {
+            let mut t = up.texture(&mut vram, Format::Rgba8, size as u32, size as u32, 1, face)?;
+            t.set_wrap(Wrap::Clamp, Wrap::Clamp);
+            t.set_filter(true, false);
+            sky.push(t);
             up.flush();
         }
         let mut ring = up.texture(&mut vram, Format::Rgba8, RING, RING, 1, &ring_bytes)?;
@@ -94,7 +138,7 @@ impl Textures {
         up.flush();
         up.free();
         let bytes = vram.used();
-        Ok(Textures { terrain, foliage, sky, water, average, horizon, ring, _vram: vram, bytes })
+        Ok(Textures { terrain, foliage, sky, water, average, horizon, light, ring, _vram: vram, bytes })
     }
 }
 
@@ -105,15 +149,13 @@ const RING: u32 = 128;
 /// edges below the horizon (`q ← (1 − |q.yx|)·sign(q)` when d.y < 0), and to the texel at `q / 2 + 1/2`. The
 /// horizon is the diamond's edge and the map is continuous across it, so filtering there needs no seam; the
 /// vertex programs compute q with no angle (`sky_toward` in frame.cg). Each texel averages a 3 × 3 spread.
-fn octahedral(sky: &TextureSet) -> Vec<u8> {
+fn octahedral(faces: &[Vec<u8>], width: usize) -> Vec<u8> {
     let n = RING as usize;
     let mut out = vec![0u8; n * n * 4];
-    if sky.format != PackFormat::Rgba8 || sky.count < 6 {
-        return out;
-    }
-    let size = sky.width as f32;
+    let size = width as f32;
+    // A world direction reads the cube with z negated, as the reference's sky box does (`sky_box_vertices`).
     let sample = |d: [f32; 3]| -> [f32; 3] {
-        let (x, y, z) = (d[0], d[1], d[2]);
+        let (x, y, z) = (d[0], d[1], -d[2]);
         let (ax, ay, az) = (x.abs(), y.abs(), z.abs());
         // Face and (s, t) by the inverse of the face convention.
         let (face, s, t) = if ax >= ay && ax >= az {
@@ -125,10 +167,10 @@ fn octahedral(sky: &TextureSet) -> Vec<u8> {
         } else {
             (5, -x / az, -y / az)
         };
-        let px = sky.texture(face);
+        let px = &faces[face];
         let u = (((s + 1.0) * 0.5 * size) as i32).clamp(0, size as i32 - 1) as usize;
         let v = (((t + 1.0) * 0.5 * size) as i32).clamp(0, size as i32 - 1) as usize;
-        let i = (v * sky.width as usize + u) * 4;
+        let i = (v * width + u) * 4;
         [px[i] as f32, px[i + 1] as f32, px[i + 2] as f32]
     };
     // The direction a point of the map stands for, the inverse of the fold.
@@ -160,4 +202,55 @@ fn octahedral(sky: &TextureSet) -> Vec<u8> {
         }
     }
     out
+}
+
+/// The sky's light by height ([`SkyLight`]), from the faces as the pack holds them (sRGB). Every fourth texel on
+/// each axis, weighted by the solid angle it covers.
+fn sky_light(sky: &TextureSet) -> SkyLight {
+    let size = sky.width as usize;
+    let linear: Vec<f32> = (0..256)
+        .map(|b| {
+            let c = b as f32 / 255.0;
+            if c <= 0.04045 { c / 12.92 } else { ((c + 0.055) / 1.055).powf(2.4) }
+        })
+        .collect();
+    let mut sums = [[0f64; 4]; 3];
+    for face in 0..6u32 {
+        let px = sky.texture(face);
+        for j in (0..size).step_by(4) {
+            for i in (0..size).step_by(4) {
+                let s = (i as f32 + 0.5) / size as f32 * 2.0 - 1.0;
+                let t = (j as f32 + 0.5) / size as f32 * 2.0 - 1.0;
+                // The height of the texel's direction (the faces as `sky_box_vertices` in scene.rs lays them).
+                let up = match face {
+                    2 => 1.0,
+                    3 => -1.0,
+                    _ => -t,
+                };
+                let len2 = 1.0 + s * s + t * t;
+                let y = up / len2.sqrt();
+                let band = if y > 0.9 {
+                    0
+                } else if y.abs() < 0.15 {
+                    1
+                } else if y < -0.9 {
+                    2
+                } else {
+                    continue;
+                };
+                let w = 1.0 / (len2 * len2.sqrt()) as f64;
+                let k = (j * size + i) * 4;
+                for c in 0..3 {
+                    sums[band][c] += linear[px[k + c] as usize] as f64 * w;
+                }
+                sums[band][3] += w;
+            }
+        }
+    }
+    let mean = |b: usize| {
+        let s = &sums[b];
+        let w = s[3].max(1e-9);
+        [(s[0] / w) as f32 * SKY_EXPOSED, (s[1] / w) as f32 * SKY_EXPOSED, (s[2] / w) as f32 * SKY_EXPOSED]
+    };
+    SkyLight { zenith: mean(0), horizon: mean(1), nadir: mean(2) }
 }

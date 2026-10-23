@@ -35,6 +35,9 @@ use ether_voxel::mesh::{Builder, ChunkMesh, Pad};
 use ether_voxel::populate::{Decor, DecorParams};
 use ether_voxel::vox::Vox;
 
+mod collision;
+pub use collision::Collision;
+
 /// Radii in chunks: horizontal and vertical. The reference's default load distance is (4, 3).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Radius {
@@ -65,7 +68,8 @@ pub enum Job {
 /// What a job produced.
 pub enum Done {
     Generated { at: IVec3, voxels: Box<Voxels>, terrain: Arc<Terrain> },
-    Meshed { at: IVec3, rev: u32, mesh: ChunkMesh, pad: Box<Pad> },
+    /// `collision` is the mesh's collision triangles, indexed (the mesh's own list is left empty).
+    Meshed { at: IVec3, rev: u32, mesh: ChunkMesh, collision: Arc<Collision>, pad: Box<Pad> },
 }
 
 /// A worker's scratch.
@@ -94,8 +98,9 @@ impl Worker {
                 Done::Generated { at, voxels, terrain }
             }
             Job::Mesh { at, rev, pad } => {
-                let mesh = self.builder.build(&pad);
-                Done::Meshed { at, rev, mesh, pad }
+                let mut mesh = self.builder.build(&pad);
+                let collision = Arc::new(Collision::new(core::mem::take(&mut mesh.collision)));
+                Done::Meshed { at, rev, mesh, collision, pad }
             }
         }
     }
@@ -119,12 +124,12 @@ struct Slot {
     /// Changed by an edit since generation.
     edited: bool,
     /// The terrain's collision triangles in chunk coordinates, from the last mesh.
-    collision: Arc<Vec<[Vec3; 3]>>,
+    collision: Arc<Collision>,
 }
 
 impl Slot {
     fn new() -> Slot {
-        Slot { voxels: None, generating: false, populated: false, rev: 0, meshed: None, meshing: false, edited: false, collision: Arc::new(Vec::new()) }
+        Slot { voxels: None, generating: false, populated: false, rev: 0, meshed: None, meshing: false, edited: false, collision: Arc::new(Collision::empty()) }
     }
 
     fn generated(&self) -> bool {
@@ -364,7 +369,7 @@ impl World {
                 self.after_arrival(at);
                 None
             }
-            Done::Meshed { at, rev, mesh, pad } => {
+            Done::Meshed { at, rev, mesh, collision, pad } => {
                 self.pad_pool.push(pad);
                 self.meshing = self.meshing.saturating_sub(1);
                 let s = self.slots.get_mut(&at)?;
@@ -373,7 +378,7 @@ impl World {
                 if s.rev != rev {
                     self.dirty.insert(at);
                 }
-                s.collision = Arc::new(mesh.collision.clone());
+                s.collision = collision;
                 Some((at, mesh))
             }
         }
@@ -440,14 +445,7 @@ impl World {
                     let at = IVec3::new(x, y, z);
                     let Some(s) = self.slots.get(&at) else { continue };
                     let o = (at * LEN).as_vec3();
-                    for t in s.collision.iter() {
-                        let (a, b, c) = (t[0] + o, t[1] + o, t[2] + o);
-                        let tmin = a.min(b).min(c);
-                        let tmax = a.max(b).max(c);
-                        if tmax.cmpge(min).all() && tmin.cmple(max).all() {
-                            out.push([a, b, c]);
-                        }
-                    }
+                    s.collision.query(min - o, max - o, o, out);
                 }
             }
         }

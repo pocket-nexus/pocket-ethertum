@@ -11,6 +11,7 @@ void main(
     uniform float4x4 uVp,
     uniform float4 uOrigin,
     uniform float4 uUv,
+    uniform float4 uAlbedo,
     uniform float4 uFrame[4],
     uniform sampler2D uRing,
     uniform float4 uMirror,
@@ -42,16 +43,23 @@ void main(
     oUvY = float2(t.x, t.z);
     oUvZ = float2(t.x, -t.y);
     oBlend = float4(aBlend.x, max(1.0 - aBlend.x - aBlend.y, 0.0), aBlend.y, aWeight);
-    // The fragment is texel × light + fog: the light is scaled by what the fog leaves.
+    // The fragment is texel × light × 3 + the fade's sky, the light through the display's curve for the material's
+    // mean texel (uAlbedo: its t²) and scaled by what the fade leaves. With the sun's map, the colour holds the
+    // light in shade and the fog's w what the sun adds, which the fragments take through the map.
     float3 fog;
     float f = fade_of(p, uOrigin, uRing, uFrame, fog);
+    float3 shade = ambient_of(aNormal, aAo, uFrame);
+    float3 lit = curve_of(shade + sun_of(aNormal, uFrame), uAlbedo.rgb);
+    float scale = (1.0 - f) * (1.0 / 3.0);
 #ifdef SHADOW
-    // The sky's light here; the sun's goes to the fragments, which take it through the shadow map.
-    oLight = float4(ambient_of(aNormal, aAo, uFrame) * (1.0 - f), 0.0);
-    float4 sh = shadow_of(p, uShadow);
-    oSun = float4(sh.xyz, sun_of(aNormal, aAo, uFrame) * (1.0 - f));
+    float3 dark = curve_of(shade, uAlbedo.rgb);
+    oLight = float4(dark * scale, 0.0);
+    oFog = float4(fog, dot(lit - dark, float3(1.0 / 3.0, 1.0 / 3.0, 1.0 / 3.0)) * scale);
+    // Tested half a voxel out along the normal: the sun's map holds the coarse caster surface (two voxels a
+    // cell), which on a slope stands above the drawn surface by more than the test's bias.
+    oSun = shadow_of(p + aNormal * 0.5, uShadow);
 #else
-    oLight = float4(light_of(aNormal, aAo, uFrame) * (1.0 - f), 0.0);
-#endif
+    oLight = float4(lit * scale, 0.0);
     oFog = float4(fog, 0.0);
+#endif
 }

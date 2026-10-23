@@ -1,7 +1,7 @@
 // Pocket Ethertum on PS Vita: build the native runtime, replace the running development container's binary
 // over PocketJS's wired debug transport (vendor/pocketjs), steer and measure.
 //
-//   bun tools/vita.ts build   [--title P3B1D7273] [--debug]
+//   bun tools/vita.ts build   [--title P25BFE5E2] [--debug]
 //   bun tools/vita.ts sync                        # pack, compiled interface and mods → host0:ether/
 //   bun tools/vita.ts native                      # sync + build + USB SELF replacement
 //   bun tools/vita.ts serve                       # USB host (keep running, detached)
@@ -14,8 +14,7 @@
 //
 // `--share DIR` uses an already-running USB host's root directory instead of this repository's
 // `.pocket-build/vita-usb/share`. The default title is Pocket Devkit (PocketJS apps/devkit), the development
-// container installed on the console: its native slots accept replacement SELFs. The Devkit on the development
-// console answers as P3B1D7273 (installed before the pocket-nexus rename).
+// container installed on the console (title P25BFE5E2): its native slots accept replacement SELFs.
 
 import { $ } from "bun";
 import { createHash, randomBytes } from "node:crypto";
@@ -32,7 +31,7 @@ const home = process.env.HOME ?? "";
 const vitasdk = process.env.VITASDK || `${home}/vitasdk`;
 const rustup = Bun.which("rustup") ?? `${home}/.cargo/bin/rustup`;
 const BIN = "pocket-ethertum-vita";
-const DEVKIT = "P3B1D7273";
+const DEVKIT = "P25BFE5E2";
 
 function value(argv: string[], flag: string, fallback: string): string {
   const i = argv.indexOf(flag);

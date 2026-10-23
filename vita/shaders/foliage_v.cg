@@ -6,6 +6,7 @@ void main(
     float3 aPosition,
     float2 aUv,
     float aAo,
+    float3 aCentre,
     uniform float4x4 uVp,
     uniform float4 uOrigin,
     uniform float4 uFrame[4],
@@ -13,7 +14,7 @@ void main(
     uniform float4 uMirror,
 #ifdef SHADOW
     uniform float4 uShadow[4],
-    out float4 oSun : TEXCOORD2,
+    uniform sampler2D uShadowMap,
 #endif
     out float4 oPosition : POSITION,
     out float2 oUv : TEXCOORD0,
@@ -33,12 +34,18 @@ void main(
 #endif
     float3 fog;
     float f = fade_of(p, uOrigin, uRing, uFrame, fog);
+    // The reference lights the cards as faces that look up: the sky's light from straight up, the sun's by its
+    // height. The reference tests every pixel of a card against the sun's shadow; here each corner is tested at
+    // a point three quarters of the way to its voxel's centre (aCentre × 2), inside the crown where the card's
+    // leaves are, not at the corner, which stands out past the crown into the sun. (Through ambient_of, a
+    // constant normal stopped the console's compiler.)
+    float sun = max(uFrame[0].y, 0.0) * uFrame[0].w;
 #ifdef SHADOW
-    oLight = float4(ambient_of(float3(0.0, 1.0, 0.0), aAo, uFrame) * (1.0 - f), 0.0);
-    float4 sh = shadow_of(p, uShadow);
-    oSun = float4(sh.xyz, sun_of(float3(0.0, 1.0, 0.0), aAo, uFrame) * (1.0 - f));
-#else
-    oLight = float4(light_of(float3(0.0, 1.0, 0.0), aAo, uFrame) * (1.0 - f), 0.0);
+    sun *= sunlit_vertex(uShadowMap, p + aCentre * 1.5, uShadow);
 #endif
+    // The display's curve for the foliage atlas's mean texel (t² of 0.116, 0.115, 0.084): within 0.04 RMS of the
+    // curve per texel over the atlas.
+    float3 e = uFrame[1].rgb * aAo + sun;
+    oLight = float4(curve_of(e, float3(0.116, 0.115, 0.084)) * ((1.0 - f) * (1.0 / 3.0)), 0.0);
     oFog = float4(fog, 0.0);
 }

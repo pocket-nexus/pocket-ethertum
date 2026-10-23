@@ -1,27 +1,40 @@
 // What every scene program takes per frame, as one array (uFrame):
-//   [0] xyz: towards the sun; w: the sun's strength (the reference's sin² of its angle)
-//   [1] rgb: light on a face that looks up (the sky); w: 1 / the distance where the world ends, in voxels
-//   [2] rgb: light on a face that looks down (the ground); w: seconds
-//   [3] rgb: the sun's colour; w: daylight on the sky picture (0 at night, 1 by day)
-// Per draw: uOrigin.xyz, the chunk's corner from the eye, in voxels. Positions arrive as 1/256 voxel from the
-// corner; the eye is the origin of the view, so the matrix uVp has no translation and far chunks keep their
-// precision.
-// Light travels to the fragments in a colour, which holds 0..1: it is carried at half and doubled there.
+//   [0] xyz: towards the sun; w: the sun's light on a face that faces it
+//   [1] rgb: the sky's light from straight up; w: 1 / the distance where the world ends, in voxels
+//   [2] rgb: the sky's light from straight down; w: seconds
+//   [3] rgb: the sky's light from the horizon; w: daylight on the sky picture (0 at night, 1 by day)
+// Light is linear and in the reference's units after its camera's exposure (textures.rs, main.rs): a texel t
+// (sRGB, taken as t²) under light E shows as display(t² E) (curve_of). Per draw: uOrigin.xyz, the chunk's corner from the
+// eye, in voxels. Positions arrive as 1/256 voxel from the corner; the eye is the origin of the view, so the
+// matrix uVp has no translation and far chunks keep their precision.
 
+// The reference lights a face with its sky box read in the face's normal: here the sky's light by height, from
+// the horizon up to the zenith and down to the nadir (which it nears faster), less the occlusion.
 float3 ambient_of(float3 n, float ao, float4 frame[4])
 {
-    return lerp(frame[2].rgb, frame[1].rgb, n.y * 0.5 + 0.5) * ao * 0.5;
+    float3 sky = n.y >= 0.0 ? lerp(frame[3].rgb, frame[1].rgb, n.y) : lerp(frame[3].rgb, frame[2].rgb, sqrt(max(-n.y, 0.0)));
+    return sky * ao;
 }
 
-// The sun's share of the light, before its colour: N·L by its strength.
-float sun_of(float3 n, float ao, float4 frame[4])
+// The sun's light on a face: N·L by its light.
+float sun_of(float3 n, float4 frame[4])
 {
-    return max(dot(n, frame[0].xyz), 0.0) * frame[0].w * ao * 0.5;
+    return max(dot(n, frame[0].xyz), 0.0) * frame[0].w;
 }
 
-float3 light_of(float3 n, float ao, float4 frame[4])
+// The reference's tone map and sRGB encoding in one curve (DISPLAY_K in textures.rs).
+half3 display(half3 x)
 {
-    return ambient_of(n, ao, frame) + frame[3].rgb * sun_of(n, ao, frame);
+    return sqrt(x / (x + (half)0.8));
+}
+
+// The same curve folded into a vertex's light for a texel whose t² is a0: the fragment shows t · curve_of(E),
+// which is display(t² E) for that texel and near it for the rest of the material. The fragment programs keep
+// their one multiply (the curve per fragment cost 7 ms over a canopy). The light then travels at a third, as a
+// colour holds 0..1, and is tripled there.
+float3 curve_of(float3 e, float3 a0)
+{
+    return sqrt(e / (a0 * e + 0.8));
 }
 
 // The world fades into the sky over the last quarter of the loaded distance: towards the sky picture's own colour

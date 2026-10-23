@@ -43,7 +43,11 @@ struct ChunkGpu {
     terrain_ib: usize,
     batches: Vec<Batch>,
     foliage: Part,
+    /// Where the eight sorted copies of the foliage's indices start (`ChunkMesh::foliage_sorted`).
+    foliage_sorted: Option<usize>,
     water: Part,
+    /// The water's bounds in the chunk (voxels from its corner), for the part of the screen the reflection needs.
+    water_box: (Vec3, Vec3),
     caster: Part,
     tris: u32,
     /// The last frame that drew it.
@@ -64,11 +68,12 @@ pub struct Stats {
 /// The view of one frame: eye, rotation and projection, and the frame's light.
 pub struct View {
     pub eye: Vec3,
+    /// The direction the eye looks in.
+    pub forward: Vec3,
     /// Projection × rotation (no translation: positions arrive relative to the eye).
     pub vp: Mat4,
     pub frame: [f32; 16],
-    pub fog: [f32; 3],
-    pub sky_zenith: [f32; 3],
+    /// The sky picture at the horizon, as shown.
     pub sky_horizon: [f32; 3],
     /// Daylight on the sky picture, and the night's own colour.
     pub sky_tint: [f32; 3],
@@ -83,27 +88,30 @@ pub struct View {
     pub water: bool,
     /// Leaves in the sea's reflection.
     pub mirror_foliage: bool,
-    /// Fog and the occlusion term off, for checking what the textures alone give.
-    pub plain: bool,
-    /// The water's own colour (rgb), the reflection's share looking straight down, how far ripples move it.
-    pub water_look: [f32; 5],
+    /// The water's reflectance looking straight down, its ripples' tilt, how far the ripples move the reflection,
+    /// the sun's glint (`water_f.cg`).
+    pub water_look: [f32; 4],
     /// The sun's shadow map this frame, and its texture; `None` while the sun is down.
     pub shadow: Option<crate::shadow::ShadowView>,
     pub shadow_map: *const g::SceGxmTexture,
-    pub sun_colour: [f32; 3],
 }
 
 struct Params3 {
     vp: Param,
     origin: Param,
     extra: Param,
+    /// The material's mean texel, squared (t² per channel): the vertex folds the display's curve for it.
+    albedo: Param,
     frame: Param,
     look: Param,
     mirror: Param,
-    /// The receivers' rows of the sun's map, the sun's colour and bias, and the map's sampler unit.
+    /// The receivers' rows of the sun's map, the test's bias, and the map's sampler unit.
     shadow: Param,
-    sun: Param,
+    bias: Param,
     map: Option<u32>,
+    /// The sun's map and the sky's ring as the vertex program reads them (the leaf cards test the map per corner).
+    vmap: Option<u32>,
+    ring: Option<u32>,
 }
 
 impl Params3 {
@@ -112,18 +120,32 @@ impl Params3 {
             vp: p.vparam("uVp"),
             origin: p.vparam("uOrigin"),
             extra: if extra.is_empty() { core::ptr::null() } else { p.vparam(extra) },
+            albedo: p.vparam("uAlbedo"),
             frame: p.vparam("uFrame"),
             look: if look.is_empty() { core::ptr::null() } else { p.fparam(look) },
             mirror: p.vparam("uMirror"),
             shadow: p.vparam("uShadow"),
-            sun: p.fparam("uSun"),
+            bias: p.fparam("uBias"),
             map: p.fs.sampler_index("uShadowMap"),
+            vmap: p.vs.sampler_index("uShadowMap"),
+            ring: p.vs.sampler_index("uRing"),
         }
     }
 }
 
-/// The programs of one kind of target: the display's (multisampled), or the reflection's (`REFLECT`: points
-/// mirrored in the sea, cut at its plane, one sample a pixel).
+/// Which programs a [`Set`] holds.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Programs {
+    /// The display's, without the sun's map.
+    Plain,
+    /// The display's, testing each point against the sun's map (`SHADOW`).
+    Shadowed,
+    /// The reflection's (`REFLECT`: points mirrored in the sea, cut at its plane, one sample a pixel).
+    Reflect,
+}
+
+/// The programs of one kind of target. A frame without the sun's map draws with the plain set: its fragment
+/// programs read one texture fewer and carry one varying fewer than the shadowed set's.
 struct Set {
     terrain: Program,
     tp: Params3,
@@ -136,14 +158,17 @@ struct Set {
 }
 
 impl Set {
-    unsafe fn new(gpu: &mut Gpu, msaa: u32, reflect: bool) -> Result<Set, String> {
+    unsafe fn new(gpu: &mut Gpu, msaa: u32, kind: Programs) -> Result<Set, String> {
         let s16 = g::SceGxmAttributeFormat_SCE_GXM_ATTRIBUTE_FORMAT_S16;
         let s8n = g::SceGxmAttributeFormat_SCE_GXM_ATTRIBUTE_FORMAT_S8N;
         let u8n = g::SceGxmAttributeFormat_SCE_GXM_ATTRIBUTE_FORMAT_U8N;
         let u16n = g::SceGxmAttributeFormat_SCE_GXM_ATTRIBUTE_FORMAT_U16N;
         let f32_ = g::SceGxmAttributeFormat_SCE_GXM_ATTRIBUTE_FORMAT_F32;
-        let defines = if reflect { format!("#define REFLECT 1\n{FRAME_CG}") } else { format!("#define SHADOW 1\n{FRAME_CG}\n{SHADOW_CG}") };
-        let tag = if reflect { "_r" } else { "" };
+        let (defines, tag) = match kind {
+            Programs::Plain => (FRAME_CG.to_string(), ""),
+            Programs::Shadowed => (format!("#define SHADOW 1\n{FRAME_CG}\n{SHADOW_CG}"), "_s"),
+            Programs::Reflect => (format!("#define REFLECT 1\n{FRAME_CG}"), "_r"),
+        };
         let terrain = gpu.program(
             &format!("terrain{tag}"),
             &defines,
@@ -158,7 +183,7 @@ impl Set {
             &defines,
             include_str!("../shaders/foliage_v.cg"),
             include_str!("../shaders/foliage_f.cg"),
-            &Stream { stride: FOLIAGE_STRIDE, attrs: &[("aPosition", 0, s16, 3), ("aUv", 6, u16n, 2), ("aAo", 10, u8n, 1)] },
+            &Stream { stride: FOLIAGE_STRIDE, attrs: &[("aPosition", 0, s16, 3), ("aUv", 6, u16n, 2), ("aAo", 10, u8n, 1), ("aCentre", 12, s8n, 3)] },
             msaa,
             &[Blend::Opaque],
         )?;
@@ -175,6 +200,7 @@ pub struct Scene {
     pub textures: Textures,
     chunks: HashMap<IVec3, ChunkGpu>,
     main: Set,
+    shadowed: Set,
     reflect: Set,
     water: Program,
     wp: Params3,
@@ -183,6 +209,16 @@ pub struct Scene {
     /// Visible chunks: distance², position, and whether any of it lies in the last quarter of the reach, where the
     /// world fades into the sky (the vertex programs read the sky only for those).
     order: Vec<(f32, IVec3, bool)>,
+    /// A measurement switch (`ctl {"probe": n}`): 1 clips the main view's foliage to one tile, which keeps its
+    /// vertex work and drops its fragments; 2 draws the cards in their hashed order everywhere; 3 draws them
+    /// without the sun's map while the terrain keeps it.
+    pub probe: u32,
+    /// The share of every chunk's foliage cards drawn, on top of the share by distance (1: all).
+    pub density: f32,
+    /// The share of a chunk's cards drawn at the edge of the loaded radius.
+    pub far_share: f32,
+    /// Each terrain material's mean texel, squared per channel (`uAlbedo`).
+    albedo: Vec<[f32; 4]>,
 }
 
 const TERRAIN_STRIDE: u16 = core::mem::size_of::<TerrainVertex>() as u16;
@@ -191,7 +227,9 @@ const WATER_STRIDE: u16 = core::mem::size_of::<LiquidVertex>() as u16;
 pub const CASTER_STRIDE: u16 = core::mem::size_of::<CasterVertex>() as u16;
 
 /// The sky box's corners: per face (+X, −X, +Y, −Y, +Z, −Z) four of (position, uv), with `s = 2u − 1`,
-/// `t = 2v − 1` and the face's direction as `ether-pack` documents the faces.
+/// `t = 2v − 1` and the face's direction as `ether-pack` documents the faces. Bevy reads its cube maps as
+/// left-handed (its sky box samples the direction with z negated): each corner stands at its face direction with
+/// z negated, so the sky lies around the world as the reference shows it.
 fn sky_box_vertices() -> Vec<f32> {
     let face = |f: usize, s: f32, t: f32| -> [f32; 3] {
         match f {
@@ -207,7 +245,7 @@ fn sky_box_vertices() -> Vec<f32> {
     for f in 0..6 {
         for (u, w) in [(0.0f32, 0.0f32), (1.0, 0.0), (0.0, 1.0), (1.0, 1.0)] {
             let p = face(f, u * 2.0 - 1.0, w * 2.0 - 1.0);
-            v.extend_from_slice(&[p[0] * 10.0, p[1] * 10.0, p[2] * 10.0, u, w]);
+            v.extend_from_slice(&[p[0] * 10.0, p[1] * 10.0, -p[2] * 10.0, u, w]);
         }
     }
     v
@@ -217,8 +255,9 @@ impl Scene {
     pub unsafe fn new(gpu: &mut Gpu, msaa: u32, heap_bytes: usize, textures: Textures) -> Result<Scene, String> {
         let s16 = g::SceGxmAttributeFormat_SCE_GXM_ATTRIBUTE_FORMAT_S16;
         let s8n = g::SceGxmAttributeFormat_SCE_GXM_ATTRIBUTE_FORMAT_S8N;
-        let main = Set::new(gpu, msaa, false)?;
-        let reflect = Set::new(gpu, g::SceGxmMultisampleMode_SCE_GXM_MULTISAMPLE_NONE, true)?;
+        let main = Set::new(gpu, msaa, Programs::Plain)?;
+        let shadowed = Set::new(gpu, msaa, Programs::Shadowed)?;
+        let reflect = Set::new(gpu, g::SceGxmMultisampleMode_SCE_GXM_MULTISAMPLE_NONE, Programs::Reflect)?;
         let water = gpu.program(
             "water",
             FRAME_CG,
@@ -238,7 +277,15 @@ impl Scene {
         for (i, k) in [0u16, 1, 2, 3].iter().enumerate() {
             *ib.add(i) = *k;
         }
-        Ok(Scene { heap: Heap::new(heap_bytes)?, textures, chunks: HashMap::new(), main, reflect, water, wp, water_units, sky_box, order: Vec::new() })
+        let albedo = textures
+            .average
+            .iter()
+            .map(|c| {
+                let t = |b: u8| (b as f32 / 255.0) * (b as f32 / 255.0);
+                [t(c[0]), t(c[1]), t(c[2]), 0.0]
+            })
+            .collect();
+        Ok(Scene { heap: Heap::new(heap_bytes)?, textures, chunks: HashMap::new(), main, shadowed, reflect, water, wp, water_units, sky_box, order: Vec::new(), probe: 0, density: 1.0, far_share: 0.25, albedo })
     }
 
     pub fn len(&self) -> usize {
@@ -262,10 +309,11 @@ impl Scene {
             w.indices.len() * 2,
             ca.vertices.len() * CASTER_STRIDE as usize,
             ca.indices.len() * 2,
+            mesh.foliage_sorted.len() * 2,
         ];
         let total: usize = sizes.iter().map(|&n| a16(n)).sum();
         let Some(range) = self.heap.alloc(total) else { return false };
-        let sources: [*const u8; 8] = [
+        let sources: [*const u8; 9] = [
             t.vertices.as_ptr().cast(),
             t.indices.as_ptr().cast(),
             fo.vertices.as_ptr().cast(),
@@ -274,15 +322,20 @@ impl Scene {
             w.indices.as_ptr().cast(),
             ca.vertices.as_ptr().cast(),
             ca.indices.as_ptr().cast(),
+            mesh.foliage_sorted.as_ptr().cast(),
         ];
-        let mut offsets = [0usize; 8];
+        let mut offsets = [0usize; 9];
         let mut at_b = 0;
-        for i in 0..8 {
+        for i in 0..9 {
             offsets[i] = at_b;
             self.heap.write(range, at_b, core::slice::from_raw_parts(sources[i], sizes[i]));
             at_b += a16(sizes[i]);
         }
         let tris = ((t.indices.len() + fo.indices.len() + w.indices.len()) / 3) as u32;
+        let water_box = w.vertices.iter().fold((Vec3::splat(f32::MAX), Vec3::splat(f32::MIN)), |(lo, hi), v| {
+            let p = Vec3::new(v.pos[0] as f32, v.pos[1] as f32, v.pos[2] as f32) / 256.0;
+            (lo.min(p), hi.max(p))
+        });
         self.chunks.insert(
             at,
             ChunkGpu {
@@ -291,7 +344,9 @@ impl Scene {
                 terrain_ib: offsets[1],
                 batches: t.batches.clone(),
                 foliage: Part { vb: offsets[2], ib: offsets[3], count: fo.indices.len() as u32 },
+                foliage_sorted: if mesh.foliage_sorted.is_empty() { None } else { Some(offsets[8]) },
                 water: Part { vb: offsets[4], ib: offsets[5], count: w.indices.len() as u32 },
+                water_box,
                 caster: Part { vb: offsets[6], ib: offsets[7], count: ca.indices.len() as u32 },
                 tris,
                 drawn: 0,
@@ -307,7 +362,7 @@ impl Scene {
         }
     }
 
-    unsafe fn chunk_uniforms(&self, ctx: *mut g::SceGxmContext, p: &Params3, vp: &[f32; 16], v: &View, at: IVec3, fades: bool) {
+    unsafe fn chunk_uniforms(&self, ctx: *mut g::SceGxmContext, p: &Params3, vp: &[f32; 16], v: &View, at: IVec3, fades: bool, albedo: &[f32; 4]) {
         let corner = (at * 16).as_vec3();
         let origin = corner - v.eye;
         let u = Uniforms::vertex(ctx);
@@ -318,19 +373,41 @@ impl Scene {
             u.set(p.extra, &extra(p as *const _ == &self.wp as *const _, at));
         }
         u.set(p.mirror, &[v.eye.y, 0.0, 0.0, 0.0]);
+        if !p.albedo.is_null() {
+            u.set(p.albedo, albedo);
+        }
         if !p.shadow.is_null() {
             // With no map, the window test fails everywhere and every point is lit.
             const NONE: [f32; 16] = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, -10.0, -10.0, 1.0, 0.0];
             u.set(p.shadow, v.shadow.as_ref().map_or(&NONE, |s| &s.rows));
-            let f = Uniforms::fragment(ctx);
-            f.set(p.sun, &[v.sun_colour[0], v.sun_colour[1], v.sun_colour[2], v.shadow.map_or(0.0, |s| s.bias)]);
+            if !p.bias.is_null() {
+                let f = Uniforms::fragment(ctx);
+                f.set(p.bias, &[v.shadow.map_or(0.0, |s| s.bias), 0.0, 0.0, 0.0]);
+            }
+        }
+    }
+
+    /// The programs for the reflection or the display, shadowed when the frame has the sun's map.
+    fn set(&self, reflect: bool, v: &View) -> &Set {
+        if reflect {
+            &self.reflect
+        } else if v.shadow.is_some() {
+            &self.shadowed
+        } else {
+            &self.main
         }
     }
 
     /// Binds the sun's map to the unit a set's programs read it from.
-    unsafe fn bind_map(ctx: *mut g::SceGxmContext, p: &Params3, v: &View) {
+    unsafe fn bind_map(&self, ctx: *mut g::SceGxmContext, p: &Params3, v: &View) {
         if let (Some(unit), false) = (p.map, v.shadow_map.is_null()) {
             g::sceGxmSetFragmentTexture(ctx, unit, v.shadow_map);
+        }
+        if let (Some(unit), false) = (p.vmap, v.shadow_map.is_null()) {
+            g::sceGxmSetVertexTexture(ctx, unit, v.shadow_map);
+            if let Some(ring) = p.ring {
+                g::sceGxmSetVertexTexture(ctx, ring, &self.textures.ring.gxm);
+            }
         }
     }
 
@@ -338,7 +415,7 @@ impl Scene {
     /// (u, v across the rays, from the eye). `foliage` draws the leaf cards, else the terrain's caster mesh.
     /// `set(ctx, origin)` writes a draw's uniforms for a chunk whose corner is `origin` from the eye. Returns the
     /// draws and the triangles.
-    pub unsafe fn draw_casters(&self, ctx: *mut g::SceGxmContext, eye: Vec3, axes: (Vec3, Vec3), rect: (Vec4, Vec4), foliage: bool, set: &mut dyn FnMut(*mut g::SceGxmContext, Vec3)) -> (u32, u32) {
+    pub unsafe fn draw_casters(&self, ctx: *mut g::SceGxmContext, eye: Vec3, axes: (Vec3, Vec3), rect: (Vec4, Vec4), foliage: Option<f32>, set: &mut dyn FnMut(*mut g::SceGxmContext, Vec3)) -> (u32, u32) {
         let (mut draws, mut tris) = (0u32, 0u32);
         let (au, av) = axes;
         for (at, c) in self.chunks.iter() {
@@ -354,14 +431,16 @@ impl Scene {
             if hi.x < rect.0.x || lo.x > rect.1.x || hi.y < rect.0.y || lo.y > rect.1.y {
                 continue;
             }
-            if foliage {
-                if c.foliage.count == 0 {
+            if let Some(share) = foliage {
+                // A prefix of the hashed order thins every crown evenly.
+                let count = (((c.foliage.count / 6) as f32 * share).ceil() as u32 * 6).min(c.foliage.count);
+                if count == 0 {
                     continue;
                 }
                 set(ctx, origin);
-                gpu::draw(ctx, self.heap.ptr(c.range, c.foliage.vb), self.heap.ptr(c.range, c.foliage.ib).cast(), c.foliage.count);
+                gpu::draw(ctx, self.heap.ptr(c.range, c.foliage.vb), self.heap.ptr(c.range, c.foliage.ib).cast(), count);
                 draws += 1;
-                tris += c.foliage.count / 3;
+                tris += count / 3;
             } else {
                 if c.caster.count == 0 {
                     continue;
@@ -375,10 +454,15 @@ impl Scene {
         (draws, tris)
     }
 
-    /// The chunks to draw, nearest first, into `self.order`: within reach, in the view. With `mirror` the boxes are
-    /// mirrored in the sea's plane and only chunks that rise above it count.
-    fn collect(&mut self, v: &View, mirror: bool, st: &mut Stats) {
-        let planes = frustum(&v.vp);
+    /// The chunks to draw, nearest first, into `self.order`: within reach, in the view. With `mirror` (the part of
+    /// the screen the reflection is drawn in) the boxes are mirrored in the sea's plane, only chunks that rise
+    /// above it count, and the view is that part of the screen.
+    fn collect(&mut self, v: &View, mirror: Option<[f32; 4]>, st: &mut Stats) {
+        let planes = match mirror {
+            Some(rect) => frustum_rect(&v.vp, rect),
+            None => frustum(&v.vp),
+        };
+        let mirror = mirror.is_some();
         self.order.clear();
         for at in self.chunks.keys() {
             let corner = (*at * 16).as_vec3();
@@ -409,12 +493,18 @@ impl Scene {
     /// the terrain's base batches and the foliage, everything under the water's plane cut away.
     pub unsafe fn draw_reflection(&mut self, ctx: *mut g::SceGxmContext, v: &View) -> Stats {
         let mut st = Stats::default();
-        crate::post::viewport(ctx, crate::post::W / 2, crate::post::H / 2);
+        // The water reads its reflection at its own place on the screen: only the rectangle that the water in view
+        // covers is drawn, and only the mirrored chunks inside it.
+        let Some(rect) = self.water_rect(v) else { return st };
+        let (w, h) = (crate::post::W / 2, crate::post::H / 2);
+        crate::post::viewport(ctx, w, h);
+        let px = |x: f32, n: u32| (((x + 1.0) * 0.5 * n as f32) as i32).clamp(0, n as i32 - 1) as u32;
+        g::sceGxmSetRegionClip(ctx, g::SceGxmRegionClipMode_SCE_GXM_REGION_CLIP_OUTSIDE, px(rect[0], w), px(-rect[3], h), px(rect[2], w), px(-rect[1], h));
         let vp = v.vp.transpose().to_cols_array();
         // The sky box is around the eye: its mirror image is the box turned upside down.
         let sky_vp = (v.vp * Mat4::from_scale(Vec3::new(1.0, -1.0, 1.0))).transpose().to_cols_array();
         self.draw_sky(ctx, true, &sky_vp, v);
-        self.collect(v, true, &mut st);
+        self.collect(v, Some(rect), &mut st);
         g::sceGxmSetVertexTexture(ctx, 0, &self.textures.ring.gxm);
         // A mirror image winds the other way.
         if v.terrain {
@@ -425,8 +515,48 @@ impl Scene {
         if v.foliage && v.mirror_foliage {
             self.foliage_pass(ctx, true, &vp, v, &mut st);
         }
+        g::sceGxmSetRegionClip(ctx, g::SceGxmRegionClipMode_SCE_GXM_REGION_CLIP_OUTSIDE, 0, 0, w - 1, h - 1);
         st.tris = st.by_pass.iter().sum();
         st
+    }
+
+    /// The part of the screen (NDC x0, y0, x1, y1) that the water in view covers, from its bounds in each chunk,
+    /// with room for the ripples' shift of where the water reads; `None` when no water is in view.
+    fn water_rect(&self, v: &View) -> Option<[f32; 4]> {
+        let planes = frustum(&v.vp);
+        let mut r = [f32::MAX, f32::MAX, f32::MIN, f32::MIN];
+        let mut add = |x: f32, y: f32| r = [r[0].min(x), r[1].min(y), r[2].max(x), r[3].max(y)];
+        for (at, c) in &self.chunks {
+            if c.water.count == 0 {
+                continue;
+            }
+            let corner = (*at * 16).as_vec3() - v.eye;
+            let (min, max) = (corner + c.water_box.0, corner + c.water_box.1);
+            if (corner + 8.0).abs().max_element() - 8.0 > v.reach || !visible(&planes, min, max) {
+                continue;
+            }
+            // The box's corners in clip space; an edge that crosses the plane w = NEAR adds the point where it
+            // does, and the corners behind it add nothing.
+            const NEAR: f32 = 0.05;
+            let q: [Vec4; 8] = core::array::from_fn(|k| v.vp * Vec3::new(if k & 1 == 0 { min.x } else { max.x }, if k & 2 == 0 { min.y } else { max.y }, if k & 4 == 0 { min.z } else { max.z }).extend(1.0));
+            for (k, a) in q.iter().enumerate() {
+                if a.w > NEAR {
+                    add(a.x / a.w, a.y / a.w);
+                }
+                for bit in [1, 2, 4] {
+                    let b = q[k ^ bit];
+                    if k & bit == 0 && (a.w > NEAR) != (b.w > NEAR) {
+                        let p = a.lerp(b, (NEAR - a.w) / (b.w - a.w));
+                        add(p.x / NEAR, p.y / NEAR);
+                    }
+                }
+            }
+        }
+        if r[0] > r[2] {
+            return None;
+        }
+        const ROOM: f32 = 0.06;
+        Some([(r[0] - ROOM).max(-1.0), (r[1] - ROOM).max(-1.0), (r[2] + ROOM).min(1.0), (r[3] + ROOM).min(1.0)])
     }
 
     /// Draws the frame's scene into the open display scene. `frame` is the number of this frame; `reflection` is
@@ -437,17 +567,18 @@ impl Scene {
         // Cg reads a float4x4 uniform row by row (`mul(M, v)` dots each row with v); glam stores columns.
         let vp = v.vp.transpose().to_cols_array();
         self.draw_sky(ctx, false, &vp, v);
-        self.collect(v, false, &mut st);
+        self.collect(v, None, &mut st);
 
         // Terrain: one draw per material, its texture bound; then the layers where materials meet, blended.
         g::sceGxmSetVertexTexture(ctx, 0, &self.textures.ring.gxm);
         if v.terrain {
             gpu::state_opaque(ctx, Cull::Back);
-            Self::bind_map(ctx, &self.main.tp, v);
-            self.main.terrain.bind(ctx, 0);
+            let set = self.set(false, v);
+            self.bind_map(ctx, &set.tp, v);
+            set.terrain.bind(ctx, 0);
             self.terrain_pass(ctx, false, &vp, v, &mut st, 0);
             gpu::state_blend(ctx, Cull::Back);
-            self.main.terrain.bind(ctx, 1);
+            set.terrain.bind(ctx, 1);
             self.terrain_pass(ctx, false, &vp, v, &mut st, 1);
         }
         for i in 0..self.order.len() {
@@ -463,14 +594,15 @@ impl Scene {
             g::sceGxmSetFragmentTexture(ctx, self.water_units.0, &self.textures.water.gxm);
             g::sceGxmSetFragmentTexture(ctx, self.water_units.1, reflection);
             let w = &v.water_look;
-            let look = [w[0], w[1], w[2], w[3], 0.0, 0.0, 0.0, 0.0, v.sky_zenith[0], v.sky_zenith[1], v.sky_zenith[2], 0.0, v.sky_horizon[0], v.sky_horizon[1], v.sky_horizon[2], v.sun, v.sun_dir.x, v.sun_dir.y, v.sun_dir.z, w[4]];
+            let h = &v.sky_horizon;
+            let look = [w[0], w[1], w[2], w[3], v.sun_dir.x, v.sun_dir.y, v.sun_dir.z, v.frame[3], h[0], h[1], h[2], 0.0];
             for i in 0..self.order.len() {
                 let (_, at, fades) = self.order[i];
                 let c = &self.chunks[&at];
                 if c.water.count == 0 {
                     continue;
                 }
-                self.chunk_uniforms(ctx, &self.wp, &vp, v, at, fades);
+                self.chunk_uniforms(ctx, &self.wp, &vp, v, at, fades, &[0.0; 4]);
                 let u = Uniforms::fragment(ctx);
                 u.set(self.wp.look, &look);
                 gpu::draw(ctx, self.heap.ptr(c.range, c.water.vb), self.heap.ptr(c.range, c.water.ib).cast(), c.water.count);
@@ -488,31 +620,47 @@ impl Scene {
 
     /// Foliage: two-sided cards, thinned with distance.
     unsafe fn foliage_pass(&self, ctx: *mut g::SceGxmContext, reflect: bool, vp: &[f32; 16], v: &View, st: &mut Stats) {
-        let set = if reflect { &self.reflect } else { &self.main };
+        // `ctl {"probe": 3}` draws the cards unshadowed while the terrain takes the sun's map, for measurements.
+        let set = if self.probe == 3 && !reflect { &self.main } else { self.set(reflect, v) };
         gpu::state_opaque(ctx, Cull::None);
         g::sceGxmSetFragmentTexture(ctx, 0, &self.textures.foliage.gxm);
-        Self::bind_map(ctx, &set.fp, v);
+        self.bind_map(ctx, &set.fp, v);
         set.foliage.bind(ctx, 0);
+        let clip = self.probe == 1 && !reflect;
+        // Chunks drawn whole take the copy of their cards sorted front to back for the view's octant (the mirror
+        // image turns y). `ctl {"probe": 2}` draws the hashed order everywhere, for comparison.
+        let f = if reflect { v.forward * Vec3::new(1.0, -1.0, 1.0) } else { v.forward };
+        let octant = (f.x < 0.0) as usize | ((f.y < 0.0) as usize) << 1 | ((f.z < 0.0) as usize) << 2;
+        if clip {
+            g::sceGxmSetRegionClip(ctx, g::SceGxmRegionClipMode_SCE_GXM_REGION_CLIP_OUTSIDE, 0, 0, 31, 31);
+        }
         for &(d2, at, fades) in &self.order {
             let c = &self.chunks[&at];
             if c.foliage.count == 0 {
                 continue;
             }
             // Cards are stored in a hashed order (`mesh::Builder`): a prefix is an even share of them. All are
-            // drawn within 24 voxels, a quarter at the edge of the loaded radius.
+            // drawn within 24 voxels, `far_share` of them at the edge of the loaded radius.
             let d = d2.sqrt();
-            let share = (1.0 - (d - 24.0).max(0.0) / (v.reach - 24.0).max(1.0) * 0.75).clamp(0.25, 1.0);
+            let share = (1.0 - (d - 24.0).max(0.0) / (v.reach - 24.0).max(1.0) * (1.0 - self.far_share)).clamp(self.far_share, 1.0) * self.density;
             let count = (((c.foliage.count / 6) as f32 * share).ceil() as u32 * 6).min(c.foliage.count);
-            self.chunk_uniforms(ctx, &set.fp, vp, v, at, fades);
-            gpu::draw(ctx, self.heap.ptr(c.range, c.foliage.vb), self.heap.ptr(c.range, c.foliage.ib).cast(), count);
+            let ib = match c.foliage_sorted {
+                Some(sorted) if count == c.foliage.count && self.probe != 2 => sorted + octant * c.foliage.count as usize * 2,
+                _ => c.foliage.ib,
+            };
+            self.chunk_uniforms(ctx, &set.fp, vp, v, at, fades, &[0.0; 4]);
+            gpu::draw(ctx, self.heap.ptr(c.range, c.foliage.vb), self.heap.ptr(c.range, ib).cast(), count);
             st.draws += 1;
             st.by_pass[3] += count / 3;
+        }
+        if clip {
+            g::sceGxmSetRegionClip(ctx, g::SceGxmRegionClipMode_SCE_GXM_REGION_CLIP_OUTSIDE, 0, 0, crate::post::W - 1, crate::post::H - 1);
         }
     }
 
     /// One terrain pass: `pass` 0 draws the base batches, 1 the layers.
     unsafe fn terrain_pass(&self, ctx: *mut g::SceGxmContext, reflect: bool, vp: &[f32; 16], v: &View, st: &mut Stats, pass: usize) {
-        let set = if reflect { &self.reflect } else { &self.main };
+        let set = self.set(reflect, v);
         let mut bound = 0u8;
         for &(_, at, fades) in &self.order {
             let c = &self.chunks[&at];
@@ -521,12 +669,12 @@ impl Scene {
                 if count == 0 {
                     continue;
                 }
+                let m = (b.material.max(1) - 1).min(self.textures.terrain.len() as u8 - 1) as usize;
                 if bound != b.material {
-                    let t = &self.textures.terrain[(b.material.max(1) - 1).min(self.textures.terrain.len() as u8 - 1) as usize];
-                    g::sceGxmSetFragmentTexture(ctx, 0, &t.gxm);
+                    g::sceGxmSetFragmentTexture(ctx, 0, &self.textures.terrain[m].gxm);
                     bound = b.material;
                 }
-                self.chunk_uniforms(ctx, &set.tp, vp, v, at, fades);
+                self.chunk_uniforms(ctx, &set.tp, vp, v, at, fades, &self.albedo[m]);
                 let vb = self.heap.ptr(c.range, c.terrain_vb + b.base as usize * TERRAIN_STRIDE as usize);
                 let ib = self.heap.ptr(c.range, c.terrain_ib + first as usize * 2).cast();
                 gpu::draw(ctx, vb, ib, count);
@@ -537,7 +685,7 @@ impl Scene {
     }
 
     unsafe fn draw_sky(&self, ctx: *mut g::SceGxmContext, reflect: bool, vp: &[f32; 16], v: &View) {
-        let set = if reflect { &self.reflect } else { &self.main };
+        let set = self.set(reflect, v);
         gpu::state_overlay(ctx);
         set.sky.bind(ctx, 0);
         let base = self.sky_box.base();
@@ -581,6 +729,15 @@ fn frustum(m: &Mat4) -> [Vec4; 6] {
     let r = |i: usize| m.row(i);
     let (r0, r1, r2, r3) = (r(0), r(1), r(2), r(3));
     [r3 + r0, r3 - r0, r3 + r1, r3 - r1, r3 + r2, r3 - r2]
+}
+
+/// The six planes of a view-projection narrowed to the part `rect` (NDC x0, y0, x1, y1) of the screen.
+fn frustum_rect(m: &Mat4, rect: [f32; 4]) -> [Vec4; 6] {
+    let (r0, r1, r2, r3) = (m.row(0), m.row(1), m.row(2), m.row(3));
+    let (cx, hx) = ((rect[0] + rect[2]) * 0.5, ((rect[2] - rect[0]) * 0.5).max(1e-3));
+    let (cy, hy) = ((rect[1] + rect[3]) * 0.5, ((rect[3] - rect[1]) * 0.5).max(1e-3));
+    let (x, y) = ((r0 - r3 * cx) / hx, (r1 - r3 * cy) / hy);
+    [r3 + x, r3 - x, r3 + y, r3 - y, r3 + r2, r3 - r2]
 }
 
 fn visible(planes: &[Vec4; 6], min: Vec3, max: Vec3) -> bool {

@@ -7,4 +7,4 @@
 - The oracle compiles the reference without optimization: its chunk writes go through `&T` cast to `&mut T`, which an optimizing build may drop (trees lose their leaves). Keep `[profile.*.package.ether-oracle] opt-level = 0`.
 - Deviations from the reference are deliberate and listed in `README.md` ("Where this differs from the reference"); add a row when you add one.
 - Use Conventional Commits (`type(scope): summary`). Keep captures, logs and receipts in `.pocket-build/`; put commands and results in PR descriptions.
-- PS Vita work happens in Pocket Devkit (`vendor/pocketjs/apps/devkit`); the Devkit on the development console answers as title `P3B1D7273`.
+- PS Vita work happens in Pocket Devkit (`vendor/pocketjs/apps/devkit`); its title is `P25BFE5E2`.

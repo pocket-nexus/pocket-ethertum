@@ -1,9 +1,10 @@
 uniform sampler2D uNormals;
 uniform sampler2D uReflect;
-// [0] rgb: the water's own colour, w: the reflection's share looking straight down; [1] unused; [2] rgb: the sky
-// overhead; [3] rgb: the sky at the horizon, w: the sun's strength; [4] xyz: towards the sun, w: how far the
-// ripples move the reflection
-uniform float4 uLook[5];
+// [0] x: the reflectance looking straight down (the reference's 0.04); y: the ripples' tilt (1 is the
+// reference's); z: how far the ripples move the reflection; w: the sun's glint (1 is the reference's)
+// [1] xyz: towards the sun; w: the sun's light (uFrame[0].w)
+// [2] rgb: the sky at the horizon as shown, which a side face reflects
+uniform float4 uLook[3];
 
 half2 octave(float2 uv)
 {
@@ -11,32 +12,37 @@ half2 octave(float2 uv)
     return (half2)tex2D(uNormals, uv).rg * (half)2.0 - (half)1.0;
 }
 
-half4 main(float2 vN0 : TEXCOORD0, float2 vN1 : TEXCOORD1, float2 vN2 : TEXCOORD2, half4 vFog : TEXCOORD3, float4 vScreen : TEXCOORD4, half4 vView : COLOR1, half4 vLight : COLOR0) : COLOR
+half4 main(float2 vN0 : TEXCOORD0, float2 vN1 : TEXCOORD1, float2 vN2 : TEXCOORD2, half4 vFog : TEXCOORD3, float4 vScreen : TEXCOORD4, half4 vView : COLOR1, half4 vAir : COLOR0) : COLOR
 {
-    // The octaves' strengths are the reference's (0.16, 0.18, 0.093); a side face keeps its flat normal. The
-    // normal stays (x, 1, z) unnormalized: its ripples are small.
-    half top = vView.w;
-    half2 xz = (octave(vN0) * (half)0.16 + octave(vN1) * (half)0.18 + octave(vN2) * (half)0.093) * top;
+    // The reference mixes each octave from straight up by its strength (0.16, 0.18, 0.093, 0.044), normalizes
+    // each, and normalizes their sum: the sum's tilt is the octaves' over four. The normal stays (x, 1, z)
+    // unnormalized: its ripples are small.
+    half2 xz = (octave(vN0) * (half)0.16 + octave(vN1) * (half)0.18 + octave(vN2) * (half)0.093) * ((half)0.25 * (half)uLook[0].y);
     half3 n = half3(xz.x, (half)1.0, xz.y);
     half3 v = vView.xyz * (half)2.0 - (half)1.0;
     half nv = saturate(dot(n, v));
     half k = (half)1.0 - nv;
     half k2 = k * k;
-    // The reference's water is a mirror (black base colour, roughness 0): what it shows is what it reflects. Its
-    // reflection is lit far brighter than the sky picture's own range, which the share looking down stands in for.
-    half fresnel = ((half)uLook[0].w + ((half)1.0 - (half)uLook[0].w) * k2 * k2 * k) * top;
-    // The scene mirrored in the sea, read where this point is on the screen, moved by the ripples.
-    float2 at = vScreen.xy / vScreen.w + (float2)xz * uLook[4].w;
-    half3 reflected = (half3)tex2D(uReflect, at).rgb;
-    // The sun's highlight: the reflection r = 2 (n·v) n − v against the sun, to the 192nd power.
-    half3 r = (half)2.0 * nv * n - v;
-    half s = saturate(dot(r, (half3)uLook[4].xyz));
-    half s2 = s * s;
-    half s4 = s2 * s2;
-    half s8 = s4 * s4;
-    half s16 = s8 * s8;
-    half s32 = s16 * s16;
-    half spec = s32 * s32 * s32 * (half)uLook[3].w * (half)4.0;
-    half3 c = lerp((half3)uLook[0].rgb * vLight.rgb * (half)2.0, reflected, fresnel) + spec;
-    return half4(c * ((half)1.0 - vLight.a) + vFog.rgb, (half)1.0);
+    // A black mirror (Schlick's Fresnel): what it shows is what it reflects, in linear light.
+    half fresnel = (half)uLook[0].x + ((half)1.0 - (half)uLook[0].x) * k2 * k2 * k;
+    // The scene mirrored in the sea, read where this point is on the screen and moved by the ripples; a side face
+    // stands where the mirror image is not, and reflects the sky at the horizon. Back to linear light through the
+    // inverse of the display's curve.
+    float2 at = vScreen.xy / vScreen.w + (float2)xz * uLook[0].z;
+    half3 shown = lerp((half3)uLook[2].rgb, (half3)tex2D(uReflect, at).rgb, vView.w);
+    shown = min(shown, (half)0.97);
+    half3 s2 = shown * shown;
+    half3 reflected = (half)0.8 * s2 / ((half)1.0 - s2);
+    // The sun's glint: the reference's specular at its least roughness (α = 0.0079), D·V·F·π·sun with
+    // D = α² / π(θ² + α²)², θ the angle between the normal and the half vector, half the reflection's angle from
+    // the sun. 4000 ≈ the peak of D·π/4.
+    float3 nf = float3(xz.x, 1.0, xz.y);
+    float3 vf = (float3)v;
+    float3 r = 2.0 * dot(nf, vf) / dot(nf, nf) * nf - vf;
+    float c = dot(r, uLook[1].xyz) * rsqrt(dot(r, r));
+    float t = (1.0 - c) * 0.5 + 6.2e-5;
+    float lobe = 3.84e-9 / (t * t);
+    half glint = (half)min(4000.0 * lobe * uLook[1].w * uLook[0].w * (float)fresnel / max((float)nv, 0.1), 1000.0);
+    half3 x = (fresnel * reflected + glint) * vAir.a + vAir.rgb;
+    return half4(display(x) * vFog.a + vFog.rgb, (half)1.0);
 }

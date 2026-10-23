@@ -1,8 +1,8 @@
 uniform sampler2D uTex;
 #ifdef SHADOW
 uniform sampler2D uShadowMap;
-// rgb: the sun's colour; w: the shadow test's bias
-uniform float4 uSun;
+// x: the shadow test's bias
+uniform float4 uBias;
 #endif
 
 half4 main(float2 vUvX : TEXCOORD0, float2 vUvY : TEXCOORD1, float2 vUvZ : TEXCOORD2, half4 vFog : TEXCOORD3,
@@ -20,11 +20,11 @@ half4 main(float2 vUvX : TEXCOORD0, float2 vUvY : TEXCOORD1, float2 vUvZ : TEXCO
 #endif
     half3 c = (half3)tex2D(uTex, vUvX).rgb * vBlend.x + (half3)tex2D(uTex, vUvY).rgb * vBlend.y + (half3)tex2D(uTex, vUvZ).rgb * vBlend.z;
 #ifdef SHADOW
-    half3 light = vLight.rgb + (half3)uSun.rgb * ((half)vSun.w * sunlit(uShadowMap, vSun, uSun.w));
+    half3 light = vLight.rgb + (half)vFog.a * sunlit(uShadowMap, vSun, uBias.x);
 #else
     half3 light = vLight.rgb;
 #endif
-    c = c * light * (half)2.0 + vFog.rgb;
+    c = c * light * (half)3.0 + vFog.rgb;
     // Alpha is the batch material's weight: 1 in a base batch, a gradient across a layer.
     return half4(c, vBlend.a);
 }

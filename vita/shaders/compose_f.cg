@@ -1,0 +1,9 @@
+// The scene with its bloom: the scene's colour times uMix.x, plus the bloom (which carries its own share).
+uniform sampler2D uTex;
+uniform sampler2D uBloom;
+uniform float4 uMix;
+
+half4 main(float2 vUv : TEXCOORD0) : COLOR
+{
+    return half4((half3)tex2D(uTex, vUv).rgb * (half)uMix.x + (half3)tex2D(uBloom, vUv).rgb, (half)1.0);
+}

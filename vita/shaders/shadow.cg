@@ -1,7 +1,7 @@
 // The receivers' side of the sun's distance map (shadow_v.cg, shadow_f.cg): uShadow[0..2] take a point from the
 // eye to the map's u and v (repeating) and to its distance 0..1 below the map's top plane; uShadow[3].xy is the
-// point's place in the map's window and z its size, beyond which nothing was drawn. A point outside the window
-// gets distance -1, which every texel lets through.
+// point's place in the map's window and z its size, beyond which nothing was drawn, and w the bias of a test made
+// in a vertex program. A point outside the window gets distance -1, which every texel lets through.
 
 float4 shadow_of(float3 p, float4 s[4])
 {
@@ -18,4 +18,13 @@ half sunlit(sampler2D map, float4 s, float bias)
 {
     float stored = dot(tex2D(map, s.xy).rgb, float3(1.0, 1.0 / 255.0, 1.0 / 65025.0));
     return (half)step(s.z - bias, stored);
+}
+
+// The same test in a vertex program, for the leaf cards: one read a corner, folded into the light the corner
+// passes on, so a card inside a crown goes dark and the cards' fragment program reads nothing more.
+float sunlit_vertex(sampler2D map, float3 p, float4 s[4])
+{
+    float4 sh = shadow_of(p, s);
+    float stored = dot(tex2Dlod(map, float4(sh.xy, 0.0, 0.0)).rgb, float3(1.0, 1.0 / 255.0, 1.0 / 65025.0));
+    return step(sh.z - s[3].w, stored);
 }

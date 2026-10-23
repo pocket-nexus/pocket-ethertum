@@ -165,3 +165,40 @@ fn caster_meshes_close_across_chunks() {
     }
     assert!(checked > 100, "{checked} edges checked");
 }
+
+#[test]
+fn sorted_foliage_holds_the_same_cards_front_to_back() {
+    let mut w = small();
+    let mut worker = Worker::new();
+    let mut checked = 0;
+    for _ in 0..10_000 {
+        let jobs = w.plan(IVec3::ZERO, 8, 8);
+        if jobs.is_empty() && w.settled() {
+            break;
+        }
+        for j in jobs {
+            let Some((_, m)) = w.finish(worker.run(j)) else { continue };
+            let n = m.foliage.indices.len();
+            assert_eq!(m.foliage_sorted.len(), n * 8);
+            if n == 0 {
+                continue;
+            }
+            let card = |ix: &[u16]| -> Vec<[i16; 3]> { ix.iter().map(|&i| m.foliage.vertices[i as usize].pos).collect() };
+            let mut hashed: Vec<Vec<[i16; 3]>> = m.foliage.indices.chunks_exact(6).map(card).collect();
+            hashed.sort();
+            for o in 0..8 {
+                let list = &m.foliage_sorted[o * n..(o + 1) * n];
+                let mut cards: Vec<Vec<[i16; 3]>> = list.chunks_exact(6).map(card).collect();
+                // Front to back along the octant's signs: the cards' centres, in the key's order.
+                let s = [if o & 1 != 0 { -1.0 } else { 1.0 }, if o & 2 != 0 { -1.0 } else { 1.0 }, if o & 4 != 0 { -1.0 } else { 1.0 }];
+                let key = |c: &Vec<[i16; 3]>| -> f32 { (0..3).map(|a| s[a] * c.iter().map(|p| p[a] as f32).sum::<f32>() / 6.0 / 256.0).sum() };
+                let keys: Vec<f32> = cards.iter().map(key).collect();
+                assert!(keys.windows(2).all(|k| k[1] >= k[0] - 2.5), "octant {o} goes back by more than a card's reach");
+                cards.sort();
+                assert_eq!(cards, hashed, "octant {o} holds other cards");
+            }
+            checked += 1;
+        }
+    }
+    assert!(checked > 0, "no chunk with foliage");
+}

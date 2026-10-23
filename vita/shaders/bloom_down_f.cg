@@ -1,0 +1,14 @@
+// The bloom's first pass, a quarter of the scene's size: four bilinear reads around each texel's place average
+// the 4 × 4 scene texels under it, and what is brighter than uBloom.x comes through, scaled by uBloom.y.
+uniform sampler2D uTex;
+// x: threshold, y: gain; zw: one scene texel
+uniform float4 uBloom;
+
+half4 main(float2 vUv : TEXCOORD0) : COLOR
+{
+    float2 d = uBloom.zw;
+    half3 c = (half3)tex2D(uTex, vUv + float2(-d.x, -d.y)).rgb + (half3)tex2D(uTex, vUv + float2(d.x, -d.y)).rgb
+        + (half3)tex2D(uTex, vUv + float2(-d.x, d.y)).rgb + (half3)tex2D(uTex, vUv + float2(d.x, d.y)).rgb;
+    c *= (half)0.25;
+    return half4(max(c - (half)uBloom.x, (half)0.0) * (half)uBloom.y, (half)1.0);
+}

@@ -1,8 +1,9 @@
 // The distance 0..1 packed into the 24 bits of R, G and B (8 bits each, most significant first), the encoding
-// the receivers decode (`shadow.cg`). CUT: texels under half alpha cast no shadow, as they are not drawn.
+// the receivers decode (`shadow.cg`). CUT: leaf cards, cut out where the texel's alpha is under uCut.x.
 
 #ifdef CUT
 uniform sampler2D uTex;
+uniform float4 uCut;
 #endif
 
 float4 main(
@@ -12,7 +13,10 @@ float4 main(
     float4 vDepth : TEXCOORD0) : COLOR
 {
 #ifdef CUT
-    if (tex2D(uTex, vUv).a < 0.5)
+    // A fixed level of the atlas: seen from the sun, many cards stand edge-on, and the level the slope of their
+    // coordinates picks is so coarse that a card's cut-out becomes a few blocks a voxel wide. Level 2 keeps 32
+    // texels of a 128-texel tile, 6 cm on a card, finer than the map's own 9 cm texels.
+    if (tex2Dlod(uTex, float4(vUv, 0.0, 2.0)).a < uCut.x)
         discard;
 #endif
     float d = saturate(vDepth.x);

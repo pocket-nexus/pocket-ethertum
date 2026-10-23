@@ -1,0 +1,12 @@
+// Nine-tap Gaussian along uStep (one texel across or down), read as five bilinear taps.
+uniform sampler2D uTex;
+uniform float4 uStep;
+
+half4 main(float2 vUv : TEXCOORD0) : COLOR
+{
+    float2 s = uStep.xy;
+    half3 c = (half3)tex2D(uTex, vUv).rgb * (half)0.2270
+        + ((half3)tex2D(uTex, vUv + s * 1.3846).rgb + (half3)tex2D(uTex, vUv - s * 1.3846).rgb) * (half)0.3162
+        + ((half3)tex2D(uTex, vUv + s * 3.2308).rgb + (half3)tex2D(uTex, vUv - s * 3.2308).rgb) * (half)0.0703;
+    return half4(c, (half)1.0);
+}

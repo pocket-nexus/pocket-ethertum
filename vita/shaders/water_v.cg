@@ -1,6 +1,7 @@
 // Faces of water voxels. The reference draws water opaque and mirror-like (deferred, black base colour,
-// roughness 0), its normal rippled by four octaves of a normal map at world.xz / 100; three octaves are kept.
-// The direction to the eye is normalized here, per vertex: a face is one voxel, and the eye is metres away.
+// roughness 0), the normal of every face rippled by four octaves of a normal map at world.xz / 100; three
+// octaves are kept. The direction to the eye is normalized here, per vertex: a face is one voxel, and the eye is
+// metres away.
 
 void main(
     float3 aPosition,
@@ -17,7 +18,7 @@ void main(
     out float2 oN1 : TEXCOORD1,
     out float2 oN2 : TEXCOORD2,
     out float4 oView : COLOR1,
-    out float4 oLight : COLOR0)
+    out float4 oAir : COLOR0)
 {
     float3 local = aPosition * (1.0 / 256.0);
     float3 p = local + uOrigin.xyz;
@@ -35,6 +36,13 @@ void main(
     oView = float4(v * 0.5 + 0.5, saturate(aNormal.y));
     float3 fog;
     float f = fade_of(p, uOrigin, uRing, uFrame, fog);
-    oLight = float4(light_of(aNormal, 1.0, uFrame), f);
-    oFog = float4(fog, 0.0);
+    oFog = float4(fog, 1.0 - f);
+    // The reference's distance fog, which only its water takes (its terrain and leaves build their material
+    // without the fog flag): atmospheric, visibility 1200 m, extinction colour (0.35, 0.5, 0.66), inscattering
+    // (110, 230, 255) / 255 and fog colour (0, 0.666, 1), through Bevy's formulas. What it adds, in linear light,
+    // and what it leaves of the surface (the mean of its three channels' extinction).
+    float d = length(p);
+    float3 added = (1.0 - exp(-d * float3(0.0000160, 0.0013212, 0.0024964))) * float3(0.0, 0.4011, 1.0);
+    float3 kept = exp(-d * float3(0.001872, 0.001297, 0.000642));
+    oAir = float4(added, (kept.x + kept.y + kept.z) * (1.0 / 3.0));
 }

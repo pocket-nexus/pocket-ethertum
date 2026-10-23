@@ -399,7 +399,9 @@ pub struct TerrainVertex {
     pub _pad: u8,
 }
 
-/// A foliage vertex: position, coordinates in the device's foliage atlas (1/65535 of it), occlusion. 12 bytes.
+/// A foliage vertex: position, coordinates in the device's foliage atlas (1/65535 of it), occlusion, and the way
+/// from the vertex to the centre of its card's voxel (127 is two voxels), where the card is tested against the
+/// sun's shadow: a card's corners stand up to a voxel out of it, past the crown's surface. 16 bytes.
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct FoliageVertex {
@@ -407,6 +409,8 @@ pub struct FoliageVertex {
     pub uv: [u16; 2],
     pub ao: u8,
     pub _pad: u8,
+    pub centre: [i8; 3],
+    pub _pad2: u8,
 }
 
 /// A water vertex: position and normal. 10 bytes, padded to 12.
@@ -458,6 +462,11 @@ pub struct Indexed<V> {
 pub struct ChunkMesh {
     pub terrain: TerrainMesh,
     pub foliage: Indexed<FoliageVertex>,
+    /// The foliage's indices again, sorted eight ways, each list `foliage.indices.len()` long. List `o` has the
+    /// cards front to back for a view whose direction has the signs of octant `o` (bit 0: x < 0, bit 1: y < 0,
+    /// bit 2: z < 0): cards are sorted by `s · voxel` with `s` those signs, which grows with distance along any
+    /// ray in the octant. `foliage.indices` keeps the hashed order, whose prefixes are even shares.
+    pub foliage_sorted: Vec<u16>,
     pub liquid: Indexed<LiquidVertex>,
     /// The terrain as the sun's map takes it: surface nets over cells of two voxels ([`casters`]).
     pub caster: Indexed<CasterVertex>,
@@ -767,10 +776,28 @@ impl Builder {
                 let i = verts.len() as u16;
                 let (u, w) = atlas_uv(pad, *key, v.uv);
                 let uv = |f: f32| libm::roundf(f.clamp(0.0, 1.0) * 65535.0) as u16;
-                verts.push(FoliageVertex { pos: fixed(v.pos), uv: [uv(u), uv(w)], ao: occlusion(pad, v.pos), _pad: 0 });
+                let voxel = (*key >> 5) as i32;
+                let centre = ivec3((voxel >> 8) & 15, (voxel >> 4) & 15, voxel & 15).as_vec3() + 0.5 - v.pos;
+                let to = |x: f32| libm::roundf((x * 63.5).clamp(-127.0, 127.0)) as i8;
+                verts.push(FoliageVertex { pos: fixed(v.pos), uv: [uv(u), uv(w)], ao: occlusion(pad, v.pos), _pad: 0, centre: [to(centre.x), to(centre.y), to(centre.z)], _pad2: 0 });
                 i
             });
             out.foliage.indices.push(at);
+        }
+        // The same cards front to back for each octant of view directions: a card that covers a pixel then lets
+        // the depth test reject the cut-out cards behind it before they are shaded.
+        let centres: Vec<IVec3> = self.stream.chunks_exact(6).map(|c| {
+            let v = (c[0].1 >> 5) as i32;
+            ivec3((v >> 8) & 15, (v >> 4) & 15, v & 15)
+        }).collect();
+        out.foliage_sorted.reserve(out.foliage.indices.len() * 8);
+        for o in 0..8 {
+            let s = ivec3(if o & 1 != 0 { -1 } else { 1 }, if o & 2 != 0 { -1 } else { 1 }, if o & 4 != 0 { -1 } else { 1 });
+            let mut ids: Vec<usize> = (0..centres.len()).collect();
+            ids.sort_by_key(|&j| centres[j].dot(s));
+            for j in ids {
+                out.foliage_sorted.extend_from_slice(&out.foliage.indices[j * 6..j * 6 + 6]);
+            }
         }
 
         // Water: the faces that meet air (the sea's surface, a pocket dug under it). A face against terrain is left
